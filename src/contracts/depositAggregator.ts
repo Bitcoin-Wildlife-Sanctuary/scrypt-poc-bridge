@@ -60,8 +60,8 @@ export class DepositAggregator extends SmartContract {
         prevTx0: AggregatorTransaction, // Transaction data of the two prev txns being aggregated.
         prevTx1: AggregatorTransaction, // Can either be a leaf tx containing the deposit request itself or already an aggregation tx.
 
-        feePrevout: ByteString,
-        isFirstInput: boolean, // Sets wether this call is made from the first or second input.
+        fundingPrevout: ByteString,
+        isFirstInput: boolean,     // Sets wether this call is made from the first or second input.
 
         depositData0: DepositData, // Contains actual data of deposit. Used when aggregating leaves.
         depositData1: DepositData
@@ -74,14 +74,14 @@ export class DepositAggregator extends SmartContract {
         assert(this.checkSig(sigOperator, this.operator))
 
         // Construct prev txids.
-        const prevTxId0 = DepositAggregator.getTxId(prevTx0)
-        const prevTxId1 = DepositAggregator.getTxId(prevTx1)
+        const prevTxId0 = DepositAggregator.getTxId(prevTx0, isPrevTxLeaf)
+        const prevTxId1 = DepositAggregator.getTxId(prevTx1, isPrevTxLeaf)
 
         // Validate prev txns.
         const hashPrevouts = DepositAggregator.getHashPrevouts(
             prevTxId0,
             prevTxId1,
-            feePrevout
+            fundingPrevout
         )
         assert(hashPrevouts == shPreimage.hashPrevouts, 'hashPrevouts mismatch')
         assert(
@@ -106,11 +106,11 @@ export class DepositAggregator extends SmartContract {
             // the specified amount of satoshis.
             assert(
                 DepositAggregator.padAmt(depositData0.amount) ==
-                    prevTx0.outputContractAmt
+                prevTx0.outputContractAmt
             )
             assert(
                 DepositAggregator.padAmt(depositData1.amount) ==
-                    prevTx1.outputContractAmt
+                prevTx1.outputContractAmt
             )
         }
 
@@ -128,7 +128,6 @@ export class DepositAggregator extends SmartContract {
 
         // Recurse. Send to aggregator with updated hash.
         const outputs = outAmt + prevTx0.outputContractSPK + stateOut
-
         assert(
             sha256(outputs) == shPreimage.hashOutputs,
             'hashOutputs mismatch'
@@ -173,19 +172,19 @@ export class DepositAggregator extends SmartContract {
     }
 
     @method()
-    static getTxId(tx: AggregatorTransaction): Sha256 {
+    static getTxId(tx: AggregatorTransaction, isPrevTxLeaf: boolean): Sha256 {
+        const inputsPrefix = isPrevTxLeaf ? toByteString('01') : (toByteString('02') + tx.inputContract)
         return hash256(
             tx.ver +
-                tx.inputContract +
-                tx.inputFee +
-                toByteString('02') +
-                tx.outputContractAmt +
-                tx.outputContractSPK +
-                toByteString('0000000000000000') +
-                OpCode.OP_RETURN +
-                toByteString('20') +
-                tx.hashData +
-                tx.locktime
+            inputsPrefix +
+            tx.inputFee +
+            toByteString('02') +
+            tx.outputContractAmt + tx.outputContractSPK +
+            toByteString('0000000000000000') +
+            OpCode.OP_RETURN +
+            toByteString('20') +
+            tx.hashData +
+            tx.locktime
         )
     }
 
@@ -198,10 +197,10 @@ export class DepositAggregator extends SmartContract {
     ): Sha256 {
         return sha256(
             txId0 +
-                toByteString('00000000') +
-                txId1 +
-                toByteString('00000000') +
-                feePrevout
+            toByteString('00000000') +
+            txId1 +
+            toByteString('00000000') +
+            feePrevout
         )
     }
 

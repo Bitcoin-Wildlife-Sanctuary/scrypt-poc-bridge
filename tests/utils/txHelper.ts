@@ -63,7 +63,7 @@ export function randomPrivateKey() {
 
 export async function fetchP2WPKHUtxos(address: btc.Address): Promise<any[]> {
     const network = process.env.NETWORK || 'local'
-    
+
     if (network === 'local') {
         return [
             {
@@ -75,7 +75,7 @@ export async function fetchP2WPKHUtxos(address: btc.Address): Promise<any[]> {
             }
         ]
     }
-    
+
     const url = `https://explorer.bc-2.jp/api/address/${address.toString()}/utxo`;
 
     let res: any[] = []
@@ -110,12 +110,17 @@ export function hashSHA256(buff: Buffer | string) {
     return Buffer.from(sha256.create().update(buff).array());
 }
 
+export type SigHashSchnorr = {
+    preimage: Buffer
+    hash: Buffer
+}
+
 export function getSigHashSchnorr(
     transaction: btc.Transaction,
     tapleafHash: Buffer,
     inputIndex = 0,
     sigHashType = 0x00
-) {
+): SigHashSchnorr {
     //const sighash = btc.Transaction.Sighash.sighash(transaction, sigHashType, inputIndex, subscript);
     const execdata = {
         annexPresent: false,
@@ -127,7 +132,7 @@ export function getSigHashSchnorr(
         codeseparatorPos: new btc.crypto.BN(4294967295),
         codeseparatorPosInit: true,
     }
-    
+
     return {
         preimage: btc.Transaction.SighashSchnorr.sighashPreimage(transaction, sigHashType, inputIndex, 3, execdata),
         hash: btc.Transaction.SighashSchnorr.sighash(transaction, sigHashType, inputIndex, 3, execdata)
@@ -146,7 +151,26 @@ export function getE(
     return BigInteger.fromBuffer(taggedHash).mod(curveSECP256K1.n);
 }
 
-export function splitSighashPreimage(preimage: Buffer) {
+export type SighashPreimageParts = {
+    tapSighash1: Buffer
+    tapSighash2: Buffer
+    epoch: Buffer
+    sighashType: Buffer
+    txVersion: Buffer
+    nLockTime: Buffer
+    hashPrevouts: Buffer
+    hashSpentAmounts: Buffer
+    hashScripts: Buffer
+    hashSequences: Buffer
+    hashOutputs: Buffer
+    spendType: Buffer
+    inputNumber: Buffer
+    tapleafHash: Buffer
+    keyVersion: Buffer
+    codeseparatorPosition: Buffer
+}
+
+export function splitSighashPreimage(preimage: Buffer): SighashPreimageParts {
     return {
         tapSighash1: preimage.slice(0, 32),
         tapSighash2: preimage.slice(32, 64),
@@ -165,6 +189,46 @@ export function splitSighashPreimage(preimage: Buffer) {
         keyVersion: preimage.slice(271, 272),
         codeseparatorPosition: preimage.slice(272)
     };
+}
+
+export type SchnorrTrickData = {
+    sighash: SigHashSchnorr
+    e: BigInteger
+    eBuff: Buffer
+    eLastByte: number
+    _e: Buffer // e' - e without last byte 
+    preimageParts: SighashPreimageParts
+}
+
+export async function schnorrTrick(
+    tx: btc.Transaction,
+    tapleafHex: string,
+    inputIndex: number = 0
+): Promise<SchnorrTrickData> {
+    // Mutate tx if it ends with 0x7f (highest single byte stack value) or 0xff (lowest signle byte stack value).
+    let e, eBuff, sighash, eLastByte;
+    while (true) {
+        sighash = getSigHashSchnorr(tx, Buffer.from(tapleafHex, 'hex'), inputIndex)
+        e = await getE(sighash.hash)
+        eBuff = e.toBuffer(32)
+        eLastByte = eBuff[eBuff.length - 1]
+        if (eLastByte != 0x7f && eLastByte != 0xff) {
+            break;
+        }
+        tx.nLockTime += 1
+    }
+
+    let _e = eBuff.slice(0, eBuff.length - 1) // e' - e without last byte
+    let preimageParts = splitSighashPreimage(sighash.preimage)
+
+    return {
+        sighash,
+        e,
+        eBuff,
+        eLastByte,
+        _e,
+        preimageParts
+    }
 }
 
 
