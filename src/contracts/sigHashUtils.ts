@@ -1,10 +1,10 @@
 import {
     ByteString,
     PubKey,
-    Sha256,
     Sig,
     SmartContractLib,
     assert,
+    int2ByteString,
     method,
     prop,
     sha256,
@@ -31,8 +31,9 @@ export type SHPreimage = {
     keyVer: ByteString
     codeSeparator: ByteString
 
-    sigHash: Sha256
-    _e: ByteString // e without last byte
+    sigHash: ByteString
+    _e: ByteString      // e without last byte
+    eSuffix: bigint     // last byte of e
 }
 
 export class SigHashUtils extends SmartContractLib {
@@ -54,9 +55,11 @@ export class SigHashUtils extends SmartContractLib {
 
     @method()
     static checkSHPreimage(shPreimage: SHPreimage): Sig {
+        assert(shPreimage.eSuffix > -127n && shPreimage.eSuffix < 127n, 'e suffix not in range [-126, 127)')
         const e = sha256(SigHashUtils.ePreimagePrefix + shPreimage.sigHash)
-        assert(e == shPreimage._e + toByteString('01'), 'invalid value of _e')
-        const s = SigHashUtils.Gx + shPreimage._e + toByteString('02')
+        assert(e == shPreimage._e + int2ByteString(shPreimage.eSuffix), 'invalid value of _e')
+        const sDelta: bigint = shPreimage.eSuffix < 0n ? -1n : 1n;
+        const s = SigHashUtils.Gx + shPreimage._e + int2ByteString(shPreimage.eSuffix + sDelta)
         const sigHash = sha256(
             SigHashUtils.preimagePrefix +
             shPreimage.txVer +

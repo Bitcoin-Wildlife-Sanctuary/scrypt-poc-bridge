@@ -117,7 +117,7 @@ export class DepositAggregator extends SmartContract {
         // Hash the hashes from the previous aggregation txns or leaves.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
         const stateOut =
-            toByteString('0000000000000000') +
+            toByteString('000000000000000022') +
             OpCode.OP_RETURN +
             toByteString('20') +
             newHash
@@ -132,6 +132,7 @@ export class DepositAggregator extends SmartContract {
             sha256(outputs) == shPreimage.hashOutputs,
             'hashOutputs mismatch'
         )
+        assert(true)
     }
 
     /**
@@ -180,7 +181,7 @@ export class DepositAggregator extends SmartContract {
             tx.inputFee +
             toByteString('02') +
             tx.outputContractAmt + tx.outputContractSPK +
-            toByteString('0000000000000000') +
+            toByteString('000000000000000022') +
             OpCode.OP_RETURN +
             toByteString('20') +
             tx.hashData +

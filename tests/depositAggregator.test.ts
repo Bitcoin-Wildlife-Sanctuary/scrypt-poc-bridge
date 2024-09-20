@@ -73,6 +73,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
             .sign(myPrivateKey)
 
         console.log('txFee (serialized):', txFunds.uncheckedSerialize())
+        console.log('')
 
         //////// Construct 4x leaf deposit transactions. ////////
         const depositDataList: DepositData[] = []
@@ -114,6 +115,9 @@ describe('Test SmartContract `DepositAggregator`', () => {
                 .sign(myPrivateKey)
 
             leafTxns.push(leafTx)
+            
+            console.log(`Leaf TX ${i} (serialized):`, leafTx.uncheckedSerialize())
+            console.log('')
         }
 
         //////// Merge leaf 0 and leaf 1. ////////
@@ -160,9 +164,11 @@ describe('Test SmartContract `DepositAggregator`', () => {
             }))
             .sign(myPrivateKey)
         
-        let schnorrTrickData = await schnorrTrick(aggregateTx0, tapleafAggregator, 0)
+        let schnorrTrickDataIn0 = await schnorrTrick(aggregateTx0, tapleafAggregator, 0)
+        let schnorrTrickDataIn1 = await schnorrTrick(aggregateTx0, tapleafAggregator, 1)
         
-        let sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+        let sigOperatorIn0 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn0.sighash.hash);
+        let sigOperatorIn1 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn1.sighash.hash);
         
         let prevTx0Ver = Buffer.alloc(4)
         prevTx0Ver.writeUInt32LE(leafTxns[0].version)
@@ -191,31 +197,32 @@ describe('Test SmartContract `DepositAggregator`', () => {
         fundingPrevout.writeInt32LE(aggregateTx0.inputs[2].outputIndex);
         
         let depositData0AddressBuff = Buffer.from(depositDataList[0].address, 'hex')
-        let depositData0AmtBuff = Buffer.alloc(8)
-        depositData0AmtBuff.writeBigInt64LE(depositDataList[0].amount)
+        let depositData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        depositData0AmtBuff.writeInt16LE(Number(depositDataList[0].amount))
 
         let depositData1AddressBuff = Buffer.from(depositDataList[1].address, 'hex')
-        let depositData1AmtBuff = Buffer.alloc(8)
-        depositData1AmtBuff.writeBigInt64LE(depositDataList[1].amount)
+        let depositData1AmtBuff = Buffer.alloc(2)
+        depositData1AmtBuff.writeInt16LE(Number(depositDataList[1].amount))
 
         let witnessesIn0 = [
-            schnorrTrickData.preimageParts.txVersion,
-            schnorrTrickData.preimageParts.nLockTime,
-            schnorrTrickData.preimageParts.hashPrevouts,
-            schnorrTrickData.preimageParts.hashSpentAmounts,
-            schnorrTrickData.preimageParts.hashScripts,
-            schnorrTrickData.preimageParts.hashSequences,
-            schnorrTrickData.preimageParts.hashOutputs,
-            schnorrTrickData.preimageParts.spendType,
-            schnorrTrickData.preimageParts.inputNumber,
-            schnorrTrickData.preimageParts.tapleafHash,
-            schnorrTrickData.preimageParts.keyVersion,
-            schnorrTrickData.preimageParts.codeseparatorPosition,
-            schnorrTrickData.sighash.hash,
-            schnorrTrickData._e,
-            Buffer.from(schnorrTrickData.eLastByte.toString(16), 'hex'),
+            schnorrTrickDataIn0.preimageParts.txVersion,
+            schnorrTrickDataIn0.preimageParts.nLockTime,
+            schnorrTrickDataIn0.preimageParts.hashPrevouts,
+            schnorrTrickDataIn0.preimageParts.hashSpentAmounts,
+            schnorrTrickDataIn0.preimageParts.hashScripts,
+            schnorrTrickDataIn0.preimageParts.hashSequences,
+            schnorrTrickDataIn0.preimageParts.hashOutputs,
+            schnorrTrickDataIn0.preimageParts.spendType,
+            schnorrTrickDataIn0.preimageParts.inputNumber,
+            schnorrTrickDataIn0.preimageParts.tapleafHash,
+            schnorrTrickDataIn0.preimageParts.keyVersion,
+            schnorrTrickDataIn0.preimageParts.codeseparatorPosition,
+            schnorrTrickDataIn0.sighash.hash,
+            schnorrTrickDataIn0._e,
+            Buffer.from([schnorrTrickDataIn0.eLastByte]),
+
             Buffer.from('01', 'hex'), // is prev tx leaf (true)
-            sigOperator,
+            sigOperatorIn0,
             
             prevTx0Ver,
             Buffer.from('', 'hex'),
@@ -248,11 +255,59 @@ describe('Test SmartContract `DepositAggregator`', () => {
         ]
         aggregateTx0.inputs[0].witnesses = witnessesIn0
         
-        let witnessesIn1 = [...witnessesIn0]
-        witnessesIn1[32] = Buffer.from('', 'hex') // is first input (false)
+        let witnessesIn1 = [
+            schnorrTrickDataIn1.preimageParts.txVersion,
+            schnorrTrickDataIn1.preimageParts.nLockTime,
+            schnorrTrickDataIn1.preimageParts.hashPrevouts,
+            schnorrTrickDataIn1.preimageParts.hashSpentAmounts,
+            schnorrTrickDataIn1.preimageParts.hashScripts,
+            schnorrTrickDataIn1.preimageParts.hashSequences,
+            schnorrTrickDataIn1.preimageParts.hashOutputs,
+            schnorrTrickDataIn1.preimageParts.spendType,
+            schnorrTrickDataIn1.preimageParts.inputNumber,
+            schnorrTrickDataIn1.preimageParts.tapleafHash,
+            schnorrTrickDataIn1.preimageParts.keyVersion,
+            schnorrTrickDataIn1.preimageParts.codeseparatorPosition,
+            schnorrTrickDataIn1.sighash.hash,
+            schnorrTrickDataIn1._e,
+            Buffer.from([schnorrTrickDataIn1.eLastByte]),
+
+            Buffer.from('01', 'hex'), // is prev tx leaf (true)
+            sigOperatorIn1,
+            
+            prevTx0Ver,
+            Buffer.from('', 'hex'),
+            prevTx0InputFee.toBuffer(),
+            prevTx0ContractAmt,
+            prevTx0ContractSPK,
+            Buffer.from(prevTx0HashData, 'hex'),
+            prevTx0Locktime,
+            
+            prevTx1Ver,
+            Buffer.from('', 'hex'),
+            prevTx1InputFee.toBuffer(),
+            prevTx1ContractAmt,
+            prevTx1ContractSPK,
+            Buffer.from(prevTx1HashData, 'hex'),
+            prevTx1Locktime,
+
+            fundingPrevout.toBuffer(),
+            Buffer.from('', 'hex'), // is first input (false)
+            
+            depositData0AddressBuff,
+            depositData0AmtBuff,
+            depositData1AddressBuff,
+            depositData1AmtBuff,
+
+            Buffer.from('', 'hex'), // OP_0 - first public method chosen
+            
+            scriptAggregator.toBuffer(),
+            Buffer.from(cblockAggregator, 'hex')
+        ]
         aggregateTx0.inputs[1].witnesses = witnessesIn1
 
         console.log('Aggreate TX 0 (serialized):', aggregateTx0.uncheckedSerialize())
+        console.log('')
 
         // Run locally
         let interpreter = new btc.Script.Interpreter()
@@ -261,8 +316,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), leafTxns[1].outputs[0].script, aggregateTx0, 1, flags, witnessesIn1, leafTxns[1].outputs[0].satoshis)
         expect(res).to.be.true
-
-
+        
 
         // TODO: Merge leaf 2 and leaf 3.
 
