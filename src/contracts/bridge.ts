@@ -76,7 +76,9 @@ export class Bridge extends SmartContract {
     static getTxId(tx: AggregatorTransaction): Sha256 {
         return hash256(
             tx.ver +
-                tx.inputContract +
+                toByteString('03') +
+                tx.inputContract0 +
+                tx.inputContract1 +
                 tx.inputFee +
                 toByteString('02') +
                 tx.outputContractAmt +

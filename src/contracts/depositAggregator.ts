@@ -18,7 +18,8 @@ import { SHPreimage, SigHashUtils } from './sigHashUtils'
 
 export type AggregatorTransaction = {
     ver: ByteString
-    inputContract: ByteString
+    inputContract0: ByteString
+    inputContract1: ByteString
     inputFee: ByteString
     outputContractAmt: ByteString
     outputContractSPK: ByteString
@@ -101,18 +102,20 @@ export class DepositAggregator extends SmartContract {
 
             assert(hashData0 == prevTx0.hashData)
             assert(hashData1 == prevTx0.hashData)
-
-            // Also check that the prev outputs actually carry
-            // the specified amount of satoshis.
-            assert(
-                DepositAggregator.padAmt(depositData0.amount) ==
-                prevTx0.outputContractAmt
-            )
-            assert(
-                DepositAggregator.padAmt(depositData1.amount) ==
-                prevTx1.outputContractAmt
-            )
         }
+
+        // Check that the prev outputs actually carry
+        // the specified amount of satoshis. The amount values
+        // can also carry aggregated amounts, in case we're not aggregating
+        // leaves anymore.
+        assert(
+            DepositAggregator.padAmt(depositData0.amount) ==
+            prevTx0.outputContractAmt
+        )
+        assert(
+            DepositAggregator.padAmt(depositData1.amount) ==
+            prevTx1.outputContractAmt
+        )
 
         // Hash the hashes from the previous aggregation txns or leaves.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
@@ -121,6 +124,7 @@ export class DepositAggregator extends SmartContract {
             OpCode.OP_RETURN +
             toByteString('20') +
             newHash
+
 
         const outAmt = DepositAggregator.padAmt(
             depositData0.amount + depositData1.amount
@@ -174,7 +178,9 @@ export class DepositAggregator extends SmartContract {
 
     @method()
     static getTxId(tx: AggregatorTransaction, isPrevTxLeaf: boolean): Sha256 {
-        const inputsPrefix = isPrevTxLeaf ? toByteString('01') : (toByteString('02') + tx.inputContract)
+        const inputsPrefix = isPrevTxLeaf ?
+            toByteString('01') :
+            (toByteString('03') + tx.inputContract0 + tx.inputContract1)
         return hash256(
             tx.ver +
             inputsPrefix +
