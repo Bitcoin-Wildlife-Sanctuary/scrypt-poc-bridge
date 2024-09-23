@@ -9,14 +9,14 @@ import { expect, use } from 'chai'
 import chaiAsPromised from 'chai-as-promised'
 use(chaiAsPromised)
 
-import { DepositAggregator, DepositData } from '../src/contracts/depositAggregator'
+import { WithdrawalAggregator, WithdrawalData } from '../src/contracts/withdrawalAggregator'
 import { Bridge } from '../src/contracts/bridge'
 import { hash256, PubKey, Sha256, toByteString } from 'scrypt-ts';
 import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, schnorrTrick } from './utils/txHelper';
 import { myAddress, myPrivateKey, myPublicKey } from './utils/privateKey';
 
 
-describe('Test SmartContract `DepositAggregator`', () => {
+describe('Test SmartContract `WithdrawalAggregator`', () => {
     let seckeyOperator
     let pubkeyOperator
     let addrP2WPKHOperator
@@ -26,12 +26,12 @@ describe('Test SmartContract `DepositAggregator`', () => {
         pubkeyOperator = myPublicKey
         addrP2WPKHOperator = myAddress
 
-        await DepositAggregator.loadArtifact()
+        await WithdrawalAggregator.loadArtifact()
         await Bridge.loadArtifact()
     })
 
     it('should pass', async () => {
-        // Create Bridge instance to get SPK which is used in DepositAggregators constructor.
+        // Create Bridge instance to get SPK which is used in WithrawalAggregators constructor.
         const bridge = new Bridge(
             PubKey(toByteString(pubkeyOperator.toString()))
         )
@@ -42,7 +42,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
         const scriptBridgeP2TR = new btc.Script(`OP_1 32 0x${tpubkeyBridge}}`)
 
         // Create aggregator instance to get P2TR address and other relevant info.
-        const aggregator = new DepositAggregator(
+        const aggregator = new WithdrawalAggregator(
             PubKey(toByteString(pubkeyOperator.toString())),
             toByteString(scriptBridgeP2TR.toBuffer().toString('hex'))
         )
@@ -61,10 +61,10 @@ describe('Test SmartContract `DepositAggregator`', () => {
 
         const txFunds = new btc.Transaction()
             .from(utxos)
-            .to(myAddress, 3000)
-            .to(myAddress, 3000)
-            .to(myAddress, 3000)
-            .to(myAddress, 3000)
+            .to(myAddress, 1500)
+            .to(myAddress, 1500)
+            .to(myAddress, 1500)
+            .to(myAddress, 1500)
             .to(myAddress, 1500)
             .to(myAddress, 1500)
             .to(myAddress, 1500)
@@ -76,13 +76,13 @@ describe('Test SmartContract `DepositAggregator`', () => {
         console.log('txFee (serialized):', txFunds.uncheckedSerialize())
         console.log('')
 
-        //////// Construct 4x leaf deposit transactions. ////////
-        const depositDataList: DepositData[] = []
-        const depositDataHashList: Sha256[] = []
+        //////// Construct 4x leaf withdrawal request transactions. ////////
+        const withdrawalDataList: WithdrawalData[] = []
+        const withdrawalDataHashList: Sha256[] = []
+        const ownProofTxns: btc.Transaction[] = []
         const leafTxns: btc.Transaction[] = []
         for (let i = 0; i < 4; i++) {
-            // UTXO where our leaf tx gets the needed funds from.
-            const fundingUTXO = {
+            const fundingUTXO0 = {
                 address: myAddress.toString(),
                 txId: txFunds.id,
                 outputIndex: i,
@@ -90,23 +90,42 @@ describe('Test SmartContract `DepositAggregator`', () => {
                 satoshis: txFunds.outputs[i].satoshis
             }
 
-            // Deposit information.
-            const depositAmount = 1500n
-            const depositData: DepositData = {
-                address: toByteString(myAddress.toBuffer().toString('hex')) as Sha256,
-                amount: depositAmount
-            }
-            const depositDataHash = DepositAggregator.hashDepositData(depositData)
-            const opRetScript = new btc.Script(`6a20${depositDataHash}`)
+            // Create ownership proof txn.
+            const ownProofTx = new btc.Transaction()
+                .from(fundingUTXO0)
+                .to(myAddress, 1100)
 
-            depositDataList.push(depositData)
-            depositDataHashList.push(depositDataHash)
+            ownProofTxns.push(ownProofTx)
+
+            console.log(`Ownership proof TX ${i} (serialized):`, ownProofTx.uncheckedSerialize())
+            console.log('')
+
+            const ownProofUTXO = {
+                address: myAddress.toString(),
+                txId: ownProofTx.id,
+                outputIndex: 0,
+                script: new btc.Script(myAddress),
+                satoshis: ownProofTx.outputs[0].satoshis
+            }
+
+            // Withdrawal information.
+            const withdrawalAmount = 1500n
+            const withdrwalData: WithdrawalData = {
+                address: toByteString(myAddress.hashBuffer.toString('hex')) as Sha256,
+                amount: withdrawalAmount
+            }
+
+            const withdrawalDataHash = WithdrawalAggregator.hashWithdrawalData(withdrwalData)
+            const opRetScript = new btc.Script(`6a20${withdrawalDataHash}`)
+
+            withdrawalDataList.push(withdrwalData)
+            withdrawalDataHashList.push(withdrawalDataHash)
 
             // Construct leaf txn.
             const leafTx = new btc.Transaction()
-                .from(fundingUTXO)
+                .from(ownProofUTXO)
                 .addOutput(new btc.Transaction.Output({
-                    satoshis: Number(depositAmount),
+                    satoshis: 546,
                     script: scriptAggregatorP2TR
                 }))
                 .addOutput(new btc.Transaction.Output({
@@ -137,12 +156,12 @@ describe('Test SmartContract `DepositAggregator`', () => {
         let fundingUTXO = {
             address: myAddress.toString(),
             txId: txFunds.id,
-            outputIndex: 5,
+            outputIndex: 4,
             script: new btc.Script(myAddress),
-            satoshis: txFunds.outputs[5].satoshis
+            satoshis: txFunds.outputs[4].satoshis
         }
 
-        const aggregateHash0 = hash256(depositDataHashList[0] + depositDataHashList[1])
+        const aggregateHash0 = hash256(withdrawalDataHashList[0] + withdrawalDataHashList[1])
         let opRetScript = new btc.Script(`6a20${aggregateHash0}`)
 
         const aggregateTx0 = new btc.Transaction()
@@ -154,9 +173,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
                 ]
             )
             .addOutput(new btc.Transaction.Output({
-                satoshis: Number(
-                    depositDataList[0].amount + depositDataList[1].amount
-                ),
+                satoshis: 546,
                 script: scriptAggregatorP2TR
             }))
             .addOutput(new btc.Transaction.Output({
@@ -177,11 +194,10 @@ describe('Test SmartContract `DepositAggregator`', () => {
         prevTx0Locktime.writeUInt32LE(leafTxns[0].nLockTime)
         let prevTx0InputFee = new btc.encoding.BufferWriter()
         leafTxns[0].inputs[0].toBufferWriter(prevTx0InputFee);
-
         let prevTx0ContractAmt = Buffer.alloc(8)
         prevTx0ContractAmt.writeUInt32LE(leafTxns[0].outputs[0].satoshis)
         let prevTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
-        let prevTx0HashData = depositDataHashList[0]
+        let prevTx0HashData = withdrawalDataHashList[0]
 
         let prevTx1Ver = Buffer.alloc(4)
         prevTx1Ver.writeUInt32LE(leafTxns[1].version)
@@ -192,19 +208,41 @@ describe('Test SmartContract `DepositAggregator`', () => {
         let prevTx1ContractAmt = Buffer.alloc(8)
         prevTx1ContractAmt.writeUInt32LE(leafTxns[1].outputs[0].satoshis)
         let prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
-        let prevTx1HashData = depositDataHashList[1]
+        let prevTx1HashData = withdrawalDataHashList[1]
+
+        let ownProofTx0Ver = Buffer.alloc(4)
+        ownProofTx0Ver.writeUInt32LE(ownProofTxns[0].version)
+        let ownProofTx0Locktime = Buffer.alloc(4)
+        ownProofTx0Locktime.writeUInt32LE(ownProofTxns[0].nLockTime)
+        let ownProofTx0Inputs = new btc.encoding.BufferWriter()
+        ownProofTx0Inputs.writeVarintNum(ownProofTxns[0].inputs.length)
+        ownProofTxns[0].inputs[0].toBufferWriter(ownProofTx0Inputs);
+        let ownProofTx0OutputAmt = Buffer.alloc(8)
+        ownProofTx0OutputAmt.writeUInt32LE(ownProofTxns[0].outputs[0].satoshis)
+        let ownProofTx0OutputAddrP2WPKH = myAddress.hashBuffer
+
+        let ownProofTx1Ver = Buffer.alloc(4)
+        ownProofTx1Ver.writeUInt32LE(ownProofTxns[1].version)
+        let ownProofTx1Locktime = Buffer.alloc(4)
+        ownProofTx1Locktime.writeUInt32LE(ownProofTxns[1].nLockTime)
+        let ownProofTx1Inputs = new btc.encoding.BufferWriter()
+        ownProofTx1Inputs.writeVarintNum(ownProofTxns[1].inputs.length)
+        ownProofTxns[1].inputs[0].toBufferWriter(ownProofTx1Inputs);
+        let ownProofTx1OutputAmt = Buffer.alloc(8)
+        ownProofTx1OutputAmt.writeUInt32LE(ownProofTxns[1].outputs[0].satoshis)
+        let ownProofTx1OutputAddrP2WPKH = myAddress.hashBuffer
 
         let fundingPrevout = new btc.encoding.BufferWriter()
         fundingPrevout.writeReverse(aggregateTx0.inputs[2].prevTxId);
         fundingPrevout.writeInt32LE(aggregateTx0.inputs[2].outputIndex);
 
-        let depositData0AddressBuff = Buffer.from(depositDataList[0].address, 'hex')
-        let depositData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
-        depositData0AmtBuff.writeInt16LE(Number(depositDataList[0].amount))
+        let withdrawalData0AddressBuff = Buffer.from(withdrawalDataList[0].address, 'hex')
+        let withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalDataList[0].amount))
 
-        let depositData1AddressBuff = Buffer.from(depositDataList[1].address, 'hex')
-        let depositData1AmtBuff = Buffer.alloc(2)
-        depositData1AmtBuff.writeInt16LE(Number(depositDataList[1].amount))
+        let withdrawalData1AddressBuff = Buffer.from(withdrawalDataList[1].address, 'hex')
+        let withdrawalData1AmtBuff = Buffer.alloc(2)
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalDataList[1].amount))
 
         let witnessesIn0 = [
             schnorrTrickDataIn0.preimageParts.txVersion,
@@ -244,13 +282,25 @@ describe('Test SmartContract `DepositAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            ownProofTx0Ver,
+            ownProofTx0Inputs.toBuffer(),
+            ownProofTx0OutputAmt,
+            ownProofTx0OutputAddrP2WPKH,
+            ownProofTx0Locktime,
+
+            ownProofTx1Ver,
+            ownProofTx1Inputs.toBuffer(),
+            ownProofTx1OutputAmt,
+            ownProofTx1OutputAddrP2WPKH,
+            ownProofTx1Locktime,
+
             fundingPrevout.toBuffer(),
             Buffer.from('01', 'hex'), // is first input (true)
 
-            depositData0AddressBuff,
-            depositData0AmtBuff,
-            depositData1AddressBuff,
-            depositData1AmtBuff,
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -297,13 +347,25 @@ describe('Test SmartContract `DepositAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            ownProofTx0Ver,
+            ownProofTx0Inputs.toBuffer(),
+            ownProofTx0OutputAmt,
+            ownProofTx0OutputAddrP2WPKH,
+            ownProofTx0Locktime,
+
+            ownProofTx1Ver,
+            ownProofTx1Inputs.toBuffer(),
+            ownProofTx1OutputAmt,
+            ownProofTx1OutputAddrP2WPKH,
+            ownProofTx1Locktime,
+
             fundingPrevout.toBuffer(),
             Buffer.from('', 'hex'), // is first input (false)
 
-            depositData0AddressBuff,
-            depositData0AmtBuff,
-            depositData1AddressBuff,
-            depositData1AmtBuff,
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -314,6 +376,8 @@ describe('Test SmartContract `DepositAggregator`', () => {
 
         console.log('Aggreate TX 0 (serialized):', aggregateTx0.uncheckedSerialize())
         console.log('')
+
+        console.log(ownProofTxns[0].toBuffer(true).toString('hex'))
 
         // Run locally
         let interpreter = new btc.Script.Interpreter()
@@ -339,12 +403,12 @@ describe('Test SmartContract `DepositAggregator`', () => {
         fundingUTXO = {
             address: myAddress.toString(),
             txId: txFunds.id,
-            outputIndex: 6,
+            outputIndex: 5,
             script: new btc.Script(myAddress),
-            satoshis: txFunds.outputs[6].satoshis
+            satoshis: txFunds.outputs[5].satoshis
         }
 
-        const aggregateHash1 = hash256(depositDataHashList[2] + depositDataHashList[3])
+        const aggregateHash1 = hash256(withdrawalDataHashList[2] + withdrawalDataHashList[3])
         opRetScript = new btc.Script(`6a20${aggregateHash1}`)
 
         const aggregateTx1 = new btc.Transaction()
@@ -356,9 +420,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
                 ]
             )
             .addOutput(new btc.Transaction.Output({
-                satoshis: Number(
-                    depositDataList[2].amount + depositDataList[3].amount
-                ),
+                satoshis: 546,
                 script: scriptAggregatorP2TR
             }))
             .addOutput(new btc.Transaction.Output({
@@ -382,7 +444,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
         prevTx0ContractAmt = Buffer.alloc(8)
         prevTx0ContractAmt.writeUInt32LE(leafTxns[2].outputs[0].satoshis)
         prevTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
-        prevTx0HashData = depositDataHashList[2]
+        prevTx0HashData = withdrawalDataHashList[2]
 
         prevTx1Ver = Buffer.alloc(4)
         prevTx1Ver.writeUInt32LE(leafTxns[3].version)
@@ -393,19 +455,41 @@ describe('Test SmartContract `DepositAggregator`', () => {
         prevTx1ContractAmt = Buffer.alloc(8)
         prevTx1ContractAmt.writeUInt32LE(leafTxns[3].outputs[0].satoshis)
         prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
-        prevTx1HashData = depositDataHashList[3]
+        prevTx1HashData = withdrawalDataHashList[3]
+
+        ownProofTx0Ver = Buffer.alloc(4)
+        ownProofTx0Ver.writeUInt32LE(ownProofTxns[2].version)
+        ownProofTx0Locktime = Buffer.alloc(4)
+        ownProofTx0Locktime.writeUInt32LE(ownProofTxns[2].nLockTime)
+        ownProofTx0Inputs = new btc.encoding.BufferWriter()
+        ownProofTx0Inputs.writeVarintNum(ownProofTxns[2].inputs.length)
+        ownProofTxns[2].inputs[0].toBufferWriter(ownProofTx0Inputs);
+        ownProofTx0OutputAmt = Buffer.alloc(8)
+        ownProofTx0OutputAmt.writeUInt32LE(ownProofTxns[2].outputs[0].satoshis)
+        ownProofTx0OutputAddrP2WPKH = myAddress.hashBuffer
+
+        ownProofTx1Ver = Buffer.alloc(4)
+        ownProofTx1Ver.writeUInt32LE(ownProofTxns[3].version)
+        ownProofTx1Locktime = Buffer.alloc(4)
+        ownProofTx1Locktime.writeUInt32LE(ownProofTxns[3].nLockTime)
+        ownProofTx1Inputs = new btc.encoding.BufferWriter()
+        ownProofTx1Inputs.writeVarintNum(ownProofTxns[3].inputs.length)
+        ownProofTxns[3].inputs[0].toBufferWriter(ownProofTx1Inputs);
+        ownProofTx1OutputAmt = Buffer.alloc(8)
+        ownProofTx1OutputAmt.writeUInt32LE(ownProofTxns[3].outputs[0].satoshis)
+        ownProofTx1OutputAddrP2WPKH = myAddress.hashBuffer
 
         fundingPrevout = new btc.encoding.BufferWriter()
         fundingPrevout.writeReverse(aggregateTx1.inputs[2].prevTxId);
         fundingPrevout.writeInt32LE(aggregateTx1.inputs[2].outputIndex);
 
-        depositData0AddressBuff = Buffer.from(depositDataList[2].address, 'hex')
-        depositData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
-        depositData0AmtBuff.writeInt16LE(Number(depositDataList[2].amount))
+        withdrawalData0AddressBuff = Buffer.from(withdrawalDataList[2].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalDataList[2].amount))
 
-        depositData1AddressBuff = Buffer.from(depositDataList[3].address, 'hex')
-        depositData1AmtBuff = Buffer.alloc(2)
-        depositData1AmtBuff.writeInt16LE(Number(depositDataList[3].amount))
+        withdrawalData1AddressBuff = Buffer.from(withdrawalDataList[3].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2)
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalDataList[3].amount))
 
         witnessesIn0 = [
             schnorrTrickDataIn0.preimageParts.txVersion,
@@ -445,13 +529,25 @@ describe('Test SmartContract `DepositAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            ownProofTx0Ver,
+            ownProofTx0Inputs.toBuffer(),
+            ownProofTx0OutputAmt,
+            ownProofTx0OutputAddrP2WPKH,
+            ownProofTx0Locktime,
+
+            ownProofTx1Ver,
+            ownProofTx1Inputs.toBuffer(),
+            ownProofTx1OutputAmt,
+            ownProofTx1OutputAddrP2WPKH,
+            ownProofTx1Locktime,
+
             fundingPrevout.toBuffer(),
             Buffer.from('01', 'hex'), // is first input (true)
 
-            depositData0AddressBuff,
-            depositData0AmtBuff,
-            depositData1AddressBuff,
-            depositData1AmtBuff,
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -498,13 +594,25 @@ describe('Test SmartContract `DepositAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            ownProofTx0Ver,
+            ownProofTx0Inputs.toBuffer(),
+            ownProofTx0OutputAmt,
+            ownProofTx0OutputAddrP2WPKH,
+            ownProofTx0Locktime,
+
+            ownProofTx1Ver,
+            ownProofTx1Inputs.toBuffer(),
+            ownProofTx1OutputAmt,
+            ownProofTx1OutputAddrP2WPKH,
+            ownProofTx1Locktime,
+
             fundingPrevout.toBuffer(),
             Buffer.from('', 'hex'), // is first input (false)
 
-            depositData0AddressBuff,
-            depositData0AmtBuff,
-            depositData1AddressBuff,
-            depositData1AmtBuff,
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -557,7 +665,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
                 ]
             )
             .addOutput(new btc.Transaction.Output({
-                satoshis: aggregateTx0UTXO.satoshis + aggregateTx1UTXO.satoshis,
+                satoshis: 546,
                 script: scriptAggregatorP2TR
             }))
             .addOutput(new btc.Transaction.Output({
@@ -606,11 +714,6 @@ describe('Test SmartContract `DepositAggregator`', () => {
         fundingPrevout.writeReverse(aggregateTx2.inputs[2].prevTxId);
         fundingPrevout.writeInt32LE(aggregateTx2.inputs[2].outputIndex);
 
-        depositData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
-        depositData0AmtBuff.writeInt16LE(aggregateTx0.outputs[0].satoshis)
-        depositData1AmtBuff = Buffer.alloc(2)
-        depositData1AmtBuff.writeInt16LE(aggregateTx1.outputs[0].satoshis)
-
         witnessesIn0 = [
             schnorrTrickDataIn0.preimageParts.txVersion,
             schnorrTrickDataIn0.preimageParts.nLockTime,
@@ -648,14 +751,26 @@ describe('Test SmartContract `DepositAggregator`', () => {
             prevTx1ContractSPK,
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
+            
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
 
             fundingPrevout.toBuffer(),
             Buffer.from('01', 'hex'), // is first input (true)
 
             Buffer.from(''),
-            depositData0AmtBuff,
             Buffer.from(''),
-            depositData1AmtBuff,
+            Buffer.from(''),
+            Buffer.from(''),
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -701,14 +816,26 @@ describe('Test SmartContract `DepositAggregator`', () => {
             prevTx1ContractSPK,
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
+            
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
+            Buffer.from(''),
 
             fundingPrevout.toBuffer(),
             Buffer.from('', 'hex'), // is first input (false)
 
             Buffer.from(''),
-            depositData0AmtBuff,
             Buffer.from(''),
-            depositData1AmtBuff,
+            Buffer.from(''),
+            Buffer.from(''),
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 

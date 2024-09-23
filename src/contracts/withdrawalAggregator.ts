@@ -17,12 +17,20 @@ import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
 
 
-export type DepositData = {
+export type WithdrawalData = {
     address: Sha256
     amount: bigint
 }
 
-export class DepositAggregator extends SmartContract {
+export type OwnershipProofTransaction = {
+    ver: ByteString
+    inputs: ByteString
+    outputAmt: ByteString
+    outputAddrP2WPKH: ByteString
+    locktime: ByteString
+}
+
+export class WithdrawalAggregator extends SmartContract {
     @prop()
     operator: PubKey
 
@@ -30,7 +38,7 @@ export class DepositAggregator extends SmartContract {
     bridgeSPK: ByteString
 
     /**
-     * Covenant used for the aggregation of deposits.
+     * Covenant used for the aggregation of withdrawal requests.
      *
      * @param operator - Public key of bridge operator.
      * @param bridgeSPK - P2TR script of the bridge state covenant. Includes length prefix!
@@ -49,13 +57,16 @@ export class DepositAggregator extends SmartContract {
         sigOperator: Sig, // Signature of the bridge operator.
 
         prevTx0: AggregatorTransaction, // Transaction data of the two prev txns being aggregated.
-        prevTx1: AggregatorTransaction, // Can either be a leaf tx containing the deposit request itself or already an aggregation tx.
+        prevTx1: AggregatorTransaction, // Can either be a leaf tx containing the withdrawal request itself or already an aggregation tx.
+
+        ownProofTx0: OwnershipProofTransaction, // Transaction that funded prevTx0. Used to proof control of withdrawal address.
+        ownProofTx1: OwnershipProofTransaction, // Transaction that funded prevTx1.
 
         fundingPrevout: ByteString,
         isFirstInput: boolean,     // Sets wether this call is made from the first or second input.
 
-        depositData0: DepositData, // Contains actual data of deposit. Used when aggregating leaves.
-        depositData1: DepositData
+        withdrawalData0: WithdrawalData, // Contains actual data of withdrawal request. Used when aggregating leaves.
+        withdrawalData1: WithdrawalData
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -87,25 +98,24 @@ export class DepositAggregator extends SmartContract {
 
         // If prev txns are leaves, check that their state data is valid.
         if (isPrevTxLeaf) {
-            const hashData0 = DepositAggregator.hashDepositData(depositData0)
-            const hashData1 = DepositAggregator.hashDepositData(depositData1)
+            const hashData0 = WithdrawalAggregator.hashWithdrawalData(withdrawalData0)
+            const hashData1 = WithdrawalAggregator.hashWithdrawalData(withdrawalData1)
 
             assert(hashData0 == prevTx0.hashData)
             assert(hashData1 == prevTx0.hashData)
-        }
 
-        // Check that the prev outputs actually carry
-        // the specified amount of satoshis. The amount values
-        // can also carry aggregated amounts, in case we're not aggregating
-        // leaves anymore.
-        assert(
-            AggregatorUtils.padAmt(depositData0.amount) ==
-            prevTx0.outputContractAmt
-        )
-        assert(
-            AggregatorUtils.padAmt(depositData1.amount) ==
-            prevTx1.outputContractAmt
-        )
+            // Construct ownership proof txids.
+            const fundingTxId0 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx0)
+            const fundingTxId1 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx1)
+
+            // Check leaves actually unlock passed funding txns.
+            assert(fundingTxId0 + toByteString('0000000000ffffffff') == prevTx0.inputFee)
+            assert(fundingTxId1 + toByteString('0000000000ffffffff') == prevTx1.inputFee)
+
+            // Check withdrawal data addresses are the same as funding txns payed to.
+            assert(withdrawalData0.address == ownProofTx0.outputAddrP2WPKH)
+            assert(withdrawalData1.address == ownProofTx1.outputAddrP2WPKH)
+        }
 
         // Hash the hashes from the previous aggregation txns or leaves.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
@@ -114,11 +124,7 @@ export class DepositAggregator extends SmartContract {
             OpCode.OP_RETURN +
             toByteString('20') +
             newHash
-
-
-        const outAmt = AggregatorUtils.padAmt(
-            depositData0.amount + depositData1.amount
-        )
+        const outAmt = toByteString('2202000000000000') // Dust amount.
 
         // Recurse. Send to aggregator with updated hash.
         const outputs = outAmt + prevTx0.outputContractSPK + stateOut
@@ -137,7 +143,7 @@ export class DepositAggregator extends SmartContract {
         shPreimage: SHPreimage,
 
         sigOperator: Sig, // Signature of the bridge operator.
-        depositAggregatorSPK: ByteString, // SPKs include length prefix!
+        withdrawalAggregatorSPK: ByteString, // SPKs include length prefix!
         feeSPK: ByteString
     ) {
         // Check sighash preimage.
@@ -151,26 +157,35 @@ export class DepositAggregator extends SmartContract {
         assert(shPreimage.inputNumber == toByteString('01000000'))
 
         // Make sure first input unlocks bridge covenant.
-        assert(len(depositAggregatorSPK) == 35n)
+        assert(len(withdrawalAggregatorSPK) == 35n)
         assert(len(feeSPK) == 23n)
         const hashSpentScripts = sha256(
-            this.bridgeSPK + depositAggregatorSPK + feeSPK
+            this.bridgeSPK + withdrawalAggregatorSPK + feeSPK
         )
         assert(
             hashSpentScripts == shPreimage.hashSpentScripts,
             'hashSpentScript mismatch'
         )
 
-        // TODO: How to also make sure that the main state covenant calls the right "deposit()" method?
+        // TODO: How to also make sure that the main state covenant calls the right "withdrawal()" method?
         //       I think this has to be done by the state covenant itself. I.e. the state covenant should also
-        //       check that when "deposit()" is called, that the second input unlocks a deposit aggregator SPK.
+        //       check that when "withdrawal()" is called, that the second input unlocks a withdrawal aggregator SPK.
     }
 
-    
     @method()
-    static hashDepositData(depositData: DepositData): Sha256 {
+    static hashWithdrawalData(withdrawalData: WithdrawalData): Sha256 {
         return hash256(
-            depositData.address + AggregatorUtils.padAmt(depositData.amount)
+            withdrawalData.address + AggregatorUtils.padAmt(withdrawalData.amount)
+        )
+    }
+
+    @method()
+    static getOwnershipProofTxId(tx: OwnershipProofTransaction): Sha256 {
+        return hash256(
+            tx.ver +
+            tx.inputs +
+            toByteString('01') + tx.outputAmt + toByteString('160014') + tx.outputAddrP2WPKH + 
+            tx.locktime
         )
     }
 

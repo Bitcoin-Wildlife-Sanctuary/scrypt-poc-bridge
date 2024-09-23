@@ -13,7 +13,7 @@ import {
     OpCode,
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
-import { AggregatorTransaction } from './depositAggregator'
+import { AggregatorTransaction } from './aggregatorUtils'
 
 export class Bridge extends SmartContract {
     @prop()
