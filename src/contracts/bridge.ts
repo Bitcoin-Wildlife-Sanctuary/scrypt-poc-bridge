@@ -11,9 +11,23 @@ import {
     ByteString,
     Sha256,
     OpCode,
+    FixedArray,
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
-import { AggregatorTransaction } from './aggregatorUtils'
+import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
+import { DepositAggregator, DepositData } from './depositAggregator'
+import { MerklePath, MerkleProof } from './merklePath'
+
+
+export type BridgeTransaction = {
+    ver: ByteString
+    inputs: ByteString
+    outputContract: ByteString
+    accountsRoot: ByteString   // Root hash of accounts tree. Stored in OP_RETURN output.
+    locktime: ByteString
+}
+
+export const MAX_DEPOSITS_AGGREGATED = 8
 
 export class Bridge extends SmartContract {
     @prop()
@@ -28,11 +42,13 @@ export class Bridge extends SmartContract {
     public deposit(
         shPreimage: SHPreimage,
         sigOperator: Sig,
-        merkleRoot: ByteString, // Updated Merkle root of balances... (len prefixed)
+        prevTx: BridgeTransaction,           // Previous bridge update transaction.
+        aggregatorTx: AggregatorTransaction, // Root aggregator transaction.
+        feePrevout: ByteString,
 
-        prevTx: AggregatorTransaction,
-        aggregatorTx: AggregatorTransaction,
-        feePrevout: ByteString
+        deposits: FixedArray<DepositData, typeof MAX_DEPOSITS_AGGREGATED>,
+        depositProofs: FixedArray<MerkleProof, typeof MAX_DEPOSITS_AGGREGATED>,
+        accountIndexes: FixedArray<bigint, typeof MAX_DEPOSITS_AGGREGATED>
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -42,8 +58,8 @@ export class Bridge extends SmartContract {
         assert(this.checkSig(sigOperator, this.operator))
 
         // Construct prev txids.
-        const prevTxId = Bridge.getTxId(aggregatorTx)
-        const aggregatorTxId = Bridge.getTxId(aggregatorTx)
+        const prevTxId = Bridge.getTxId(prevTx)
+        const aggregatorTxId = AggregatorUtils.getTxId(aggregatorTx, false)
 
         // Validate prev txns.
         const hashPrevouts = Bridge.getHashPrevouts(
@@ -57,36 +73,44 @@ export class Bridge extends SmartContract {
             'state covenant must be called via first input'
         )
 
-        // TODO: Check withdraw / deposit aggregation result?
+        // Check deposit aggregation result and construct new accounts root.
+        let accountsRootNew = prevTx.accountsRoot
+        for (let i = 0; i < MAX_DEPOSITS_AGGREGATED; i++) {
+            const deposit = deposits[i]
+            const hashDeposit = DepositAggregator.hashDepositData(deposit)
+
+            // Check Merkle proof of deposit.
+            const depositProof = depositProofs[i]
+            assert(MerklePath.calcMerkleRoot(hashDeposit, depositProof) == aggregatorTx.hashData)
+
+            // TODO: Update accounts root hash.
+            
+        }
 
         // Update state data
         const stateOut =
-            toByteString('0000000000000000') + OpCode.OP_RETURN + merkleRoot
+            toByteString('00000000000000006a20') + accountsRootNew
 
         // Enforce outputs.
         const hashOutputs = sha256(
-            toByteString('2202000000000000') + // 546 sats...
-                prevTx.outputContractSPK +
-                stateOut
+            prevTx.outputContract +
+            stateOut
         )
         assert(hashOutputs == shPreimage.hashOutputs, 'hashOutputs mismatch')
     }
 
     @method()
-    static getTxId(tx: AggregatorTransaction): Sha256 {
+    static getTxId(tx: BridgeTransaction): Sha256 {
         return hash256(
             tx.ver +
-                toByteString('03') +
-                tx.inputContract0 +
-                tx.inputContract1 +
-                tx.inputFee +
-                toByteString('02') +
-                tx.outputContractAmt +
-                tx.outputContractSPK +
-                toByteString('0000000000000000') +
-                OpCode.OP_RETURN +
-                tx.hashData +
-                tx.locktime
+            tx.inputs +
+            toByteString('02') +
+            tx.outputContract +
+            toByteString('000000000000000022') +
+            OpCode.OP_RETURN +
+            toByteString('20') +
+            tx.accountsRoot +
+            tx.locktime
         )
     }
 
@@ -98,10 +122,10 @@ export class Bridge extends SmartContract {
     ): Sha256 {
         return sha256(
             prevStateTxId +
-                toByteString('00000000') +
-                aggregatorTxId +
-                toByteString('00000000') +
-                feePrevout
+            toByteString('00000000') +
+            aggregatorTxId +
+            toByteString('00000000') +
+            feePrevout
         )
     }
 }
