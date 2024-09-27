@@ -76,7 +76,10 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         console.log('txFee (serialized):', txFunds.uncheckedSerialize())
         console.log('')
 
+        
+        ////////////////////////////////////////////////////////////////////
         //////// Construct 4x leaf withdrawal request transactions. ////////
+        ////////////////////////////////////////////////////////////////////
         const withdrawalDataList: WithdrawalData[] = []
         const withdrawalDataHashList: Sha256[] = []
         const ownProofTxns: btc.Transaction[] = []
@@ -140,7 +143,10 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             console.log('')
         }
 
+        
+        //////////////////////////////////////////
         //////// Merge leaf 0 and leaf 1. ////////
+        //////////////////////////////////////////
         let leafTx0UTXO = {
             txId: leafTxns[0].id,
             outputIndex: 0,
@@ -282,6 +288,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+
             ownProofTx0Ver,
             ownProofTx0Inputs.toBuffer(),
             ownProofTx0OutputAmt,
@@ -347,6 +391,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+
             ownProofTx0Ver,
             ownProofTx0Inputs.toBuffer(),
             ownProofTx0OutputAmt,
@@ -387,7 +469,10 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         res = interpreter.verify(new btc.Script(''), leafTxns[1].outputs[0].script, aggregateTx0, 1, flags, witnessesIn1, leafTxns[1].outputs[0].satoshis)
         expect(res).to.be.true
 
+        
+        //////////////////////////////////////////
         //////// Merge leaf 2 and leaf 3. ////////
+        //////////////////////////////////////////
         leafTx0UTXO = {
             txId: leafTxns[2].id,
             outputIndex: 0,
@@ -529,6 +614,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+
             ownProofTx0Ver,
             ownProofTx0Inputs.toBuffer(),
             ownProofTx0OutputAmt,
@@ -594,6 +717,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from('', 'hex'),
+
             ownProofTx0Ver,
             ownProofTx0Inputs.toBuffer(),
             ownProofTx0OutputAmt,
@@ -632,7 +793,10 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         res = interpreter.verify(new btc.Script(''), leafTxns[3].outputs[0].script, aggregateTx1, 1, flags, witnessesIn1, leafTxns[3].outputs[0].satoshis)
         expect(res).to.be.true
 
+        
+        ////////////////////////////////////////////
         //////// Merge two aggregate nodes. ////////
+        ////////////////////////////////////////////
         let aggregateTx0UTXO = {
             txId: aggregateTx0.id,
             outputIndex: 0,
@@ -709,6 +873,50 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         prevTx1ContractAmt.writeUInt32LE(aggregateTx1.outputs[0].satoshis)
         prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
         prevTx1HashData = aggregateHash1
+        
+        let ancestorTx0Ver = Buffer.alloc(4)
+        ancestorTx0Ver.writeUInt32LE(leafTxns[0].version)
+        let ancestorTx0Locktime = Buffer.alloc(4)
+        ancestorTx0Locktime.writeUInt32LE(leafTxns[0].nLockTime)
+        let ancestorTx0InputFee = new btc.encoding.BufferWriter()
+        leafTxns[0].inputs[0].toBufferWriter(ancestorTx0InputFee);
+        let ancestorTx0ContractAmt = Buffer.alloc(8)
+        ancestorTx0ContractAmt.writeUInt32LE(leafTxns[0].outputs[0].satoshis)
+        let ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
+        let ancestorTx0HashData = withdrawalDataHashList[0]
+
+        let ancestorTx1Ver = Buffer.alloc(4)
+        ancestorTx1Ver.writeUInt32LE(leafTxns[1].version)
+        let ancestorTx1Locktime = Buffer.alloc(4)
+        ancestorTx1Locktime.writeUInt32LE(leafTxns[1].nLockTime)
+        let ancestorTx1InputFee = new btc.encoding.BufferWriter()
+        leafTxns[1].inputs[0].toBufferWriter(ancestorTx1InputFee);
+        let ancestorTx1ContractAmt = Buffer.alloc(8)
+        ancestorTx1ContractAmt.writeUInt32LE(leafTxns[1].outputs[0].satoshis)
+        let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
+        let ancestorTx1HashData = withdrawalDataHashList[1]
+        
+        let ancestorTx2Ver = Buffer.alloc(4)
+        ancestorTx2Ver.writeUInt32LE(leafTxns[2].version)
+        let ancestorTx2Locktime = Buffer.alloc(4)
+        ancestorTx2Locktime.writeUInt32LE(leafTxns[2].nLockTime)
+        let ancestorTx2InputFee = new btc.encoding.BufferWriter()
+        leafTxns[2].inputs[0].toBufferWriter(ancestorTx2InputFee);
+        let ancestorTx2ContractAmt = Buffer.alloc(8)
+        ancestorTx2ContractAmt.writeUInt32LE(leafTxns[2].outputs[0].satoshis)
+        let ancestorTx2ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
+        let ancestorTx2HashData = withdrawalDataHashList[2]
+
+        let ancestorTx3Ver = Buffer.alloc(4)
+        ancestorTx3Ver.writeUInt32LE(leafTxns[3].version)
+        let ancestorTx3Locktime = Buffer.alloc(4)
+        ancestorTx3Locktime.writeUInt32LE(leafTxns[3].nLockTime)
+        let ancestorTx3InputFee = new btc.encoding.BufferWriter()
+        leafTxns[3].inputs[0].toBufferWriter(ancestorTx3InputFee);
+        let ancestorTx3ContractAmt = Buffer.alloc(8)
+        ancestorTx3ContractAmt.writeUInt32LE(leafTxns[3].outputs[0].satoshis)
+        let ancestorTx3ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
+        let ancestorTx3HashData = withdrawalDataHashList[3]
 
         fundingPrevout = new btc.encoding.BufferWriter()
         fundingPrevout.writeReverse(aggregateTx2.inputs[2].prevTxId);
@@ -752,6 +960,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
             
+            ancestorTx0Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx0InputFee.toBuffer(),
+            ancestorTx0ContractAmt,
+            ancestorTx0ContractSPK,
+            Buffer.from(ancestorTx0HashData, 'hex'),
+            ancestorTx0Locktime,
+
+            ancestorTx1Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx1InputFee.toBuffer(),
+            ancestorTx1ContractAmt,
+            ancestorTx1ContractSPK,
+            Buffer.from(ancestorTx1HashData, 'hex'),
+            ancestorTx1Locktime,
+
+            ancestorTx2Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx2InputFee.toBuffer(),
+            ancestorTx2ContractAmt,
+            ancestorTx2ContractSPK,
+            Buffer.from(ancestorTx2HashData, 'hex'),
+            ancestorTx2Locktime,
+
+            ancestorTx3Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx3InputFee.toBuffer(),
+            ancestorTx3ContractAmt,
+            ancestorTx3ContractSPK,
+            Buffer.from(ancestorTx3HashData, 'hex'),
+            ancestorTx3Locktime,
+
+            Buffer.from('01', 'hex'), // is ancestor leaf (true)
+
             Buffer.from(''),
             Buffer.from(''),
             Buffer.from(''),
@@ -817,6 +1063,44 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
             
+            ancestorTx0Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx0InputFee.toBuffer(),
+            ancestorTx0ContractAmt,
+            ancestorTx0ContractSPK,
+            Buffer.from(ancestorTx0HashData, 'hex'),
+            ancestorTx0Locktime,
+
+            ancestorTx1Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx1InputFee.toBuffer(),
+            ancestorTx1ContractAmt,
+            ancestorTx1ContractSPK,
+            Buffer.from(ancestorTx1HashData, 'hex'),
+            ancestorTx1Locktime,
+
+            ancestorTx2Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx2InputFee.toBuffer(),
+            ancestorTx2ContractAmt,
+            ancestorTx2ContractSPK,
+            Buffer.from(ancestorTx2HashData, 'hex'),
+            ancestorTx2Locktime,
+
+            ancestorTx3Ver,
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            ancestorTx3InputFee.toBuffer(),
+            ancestorTx3ContractAmt,
+            ancestorTx3ContractSPK,
+            Buffer.from(ancestorTx3HashData, 'hex'),
+            ancestorTx3Locktime,
+
+            Buffer.from('01', 'hex'), // is ancestor leaf (true)
+
             Buffer.from(''),
             Buffer.from(''),
             Buffer.from(''),
