@@ -1,4 +1,4 @@
-import { assert, ByteString, hash256, int2ByteString, method, OpCode, Sha256, sha256, SmartContractLib, toByteString } from "scrypt-ts";
+import { assert, ByteString, hash256, int2ByteString, len, method, OpCode, Sha256, sha256, SmartContractLib, toByteString } from "scrypt-ts";
 
 
 export type AggregatorTransaction = {
@@ -61,6 +61,21 @@ export class AggregatorUtils extends SmartContractLib {
             assert(false, 'bad amt')
         }
         return res
+    }
+
+    @method()
+    static getStateOutput(hash: Sha256): ByteString {
+        return toByteString('0000000000000000') + // Output satoshis (0 sats)
+            toByteString('22') +               // Script lenght (34 bytes)
+            OpCode.OP_RETURN +
+            toByteString('20') +               // Hash length (32 bytes)
+            hash
+    }
+
+    @method()
+    static getContractOutput(amt: bigint, spk: ByteString): ByteString {
+        assert(len(spk) == 35n)
+        return AggregatorUtils.padAmt(amt) + spk
     }
 
 }

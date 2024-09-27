@@ -9,9 +9,7 @@ import {
     PubKey,
     prop,
     ByteString,
-    Sha256,
-    OpCode,
-    len,
+    Sha256
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
@@ -41,26 +39,39 @@ export class DepositAggregator extends SmartContract {
         this.bridgeSPK = bridgeSPK
     }
 
+    /**
+     * Aggregates two aggregator transactions (or leaves) into one.
+     *
+     * @param shPreimage - Sighash preimage of the currently executing transaction.
+     * @param isPrevTxLeaf - Indicates whether the previous transactions are leaves.
+     * @param sigOperator - Signature of the bridge operator.
+     * @param prevTx0 - Transaction data of the first previous transaction being aggregated. Can be a leaf transaction containing the deposit request itself or an already aggregated transaction.
+     * @param prevTx1 - Transaction data of the second previous transaction being aggregated.
+     * @param ancestorTx0 - First ancestor transaction. These are used to inductively verify the transaction history; ignored when aggregating leaves.
+     * @param ancestorTx1 - Second ancestor transaction.
+     * @param ancestorTx2 - Third ancestor transaction.
+     * @param ancestorTx3 - Fourth ancestor transaction.
+     * @param isAncestorLeaf - Indicates whether the ancestor transactions are leaves.
+     * @param fundingPrevout - The prevout for the funding UTXO.
+     * @param isFirstInput - Indicates whether this method is called from the first or second input.
+     * @param depositData0 - Actual deposit data of the first deposit; used when aggregating leaves.
+     * @param depositData1 - Actual deposit data of the second deposit; used when aggregating leaves.
+     */
     @method()
     public aggregate(
         shPreimage: SHPreimage,
-
-        isPrevTxLeaf: boolean, // Marks if prev txns are leaves.
-        sigOperator: Sig, // Signature of the bridge operator.
-
-        prevTx0: AggregatorTransaction, // Transaction data of the two prev txns being aggregated.
-        prevTx1: AggregatorTransaction, // Can either be a leaf tx containing the deposit request itself or already an aggregation tx.
-
-        ancestorTx0: AggregatorTransaction, // Ancestor transactions need to be checked in order to inductively verify  
-        ancestorTx1: AggregatorTransaction, // the whole trees history. Ignored when aggregating leaves.
+        isPrevTxLeaf: boolean,
+        sigOperator: Sig,
+        prevTx0: AggregatorTransaction,
+        prevTx1: AggregatorTransaction,
+        ancestorTx0: AggregatorTransaction,
+        ancestorTx1: AggregatorTransaction,
         ancestorTx2: AggregatorTransaction,
         ancestorTx3: AggregatorTransaction,
-        isAncestorLeaf: boolean,  // Marks if ancestor txns are leaves.
-
+        isAncestorLeaf: boolean,
         fundingPrevout: ByteString,
-        isFirstInput: boolean,     // Sets wether this call is made from the first or second input.
-
-        depositData0: DepositData, // Contains actual data of deposit. Used when aggregating leaves.
+        isFirstInput: boolean,
+        depositData0: DepositData,
         depositData1: DepositData
     ) {
         // Check sighash preimage.
@@ -74,39 +85,42 @@ export class DepositAggregator extends SmartContract {
         const prevTxId0 = AggregatorUtils.getTxId(prevTx0, isPrevTxLeaf)
         const prevTxId1 = AggregatorUtils.getTxId(prevTx1, isPrevTxLeaf)
 
-        // Validate prev txns.
+        // Check passed prev txns are actually unlocked by the currently executing tx.
         const hashPrevouts = AggregatorUtils.getHashPrevouts(
             prevTxId0,
             prevTxId1,
             fundingPrevout
         )
-        assert(hashPrevouts == shPreimage.hashPrevouts, 'hashPrevouts mismatch')
-        assert(
-            prevTx0.outputContractSPK == prevTx1.outputContractSPK,
-            'prev out script mismatch'
-        )
+        assert(hashPrevouts == shPreimage.hashPrevouts)
+
+        // Check prev txns SPK match.
+        assert(prevTx0.outputContractSPK == prevTx1.outputContractSPK)
+
+        // Check isFirstInput flag is valid.
         if (isFirstInput) {
             assert(shPreimage.inputNumber == toByteString('00000000'))
         } else {
             assert(shPreimage.inputNumber == toByteString('01000000'))
         }
-        
+
         if (isPrevTxLeaf) {
-            // If prev txns are leaves, check that their state data is valid.
+            // If prev txns are leaves, check that the hash in their state
+            // OP_RETURN output corresponds to the data passed in as witnesses.
             const hashData0 = DepositAggregator.hashDepositData(depositData0)
             const hashData1 = DepositAggregator.hashDepositData(depositData1)
 
             assert(hashData0 == prevTx0.hashData)
             assert(hashData1 == prevTx0.hashData)
         } else {
-            // If higher up the aggregation tree, we need to check ancestor
+            // If we're higher up the aggregation tree, we need to check ancestor
             // transactions in order to inductively validate the whole tree.
             const ancestorTxId0 = AggregatorUtils.getTxId(ancestorTx0, isAncestorLeaf)
             const ancestorTxId1 = AggregatorUtils.getTxId(ancestorTx1, isAncestorLeaf)
             const ancestorTxId2 = AggregatorUtils.getTxId(ancestorTx2, isAncestorLeaf)
             const ancestorTxId3 = AggregatorUtils.getTxId(ancestorTx3, isAncestorLeaf)
-            
+
             // Check prevTx0 unlocks ancestorTx0 and ancestorTx1.
+            // Input structure: ancestorTxId + output index (0000000000) + nSequence (ffffffff)
             assert(prevTx0.inputContract0 == ancestorTxId0 + toByteString('0000000000ffffffff'))
             assert(prevTx0.inputContract1 == ancestorTxId1 + toByteString('0000000000ffffffff'))
 
@@ -115,16 +129,17 @@ export class DepositAggregator extends SmartContract {
             assert(prevTx1.inputContract1 == ancestorTxId3 + toByteString('0000000000ffffffff'))
 
             // Check ancestors have same contract SPK as prev txns.
+            // This completes the inductive step, since the successfull evaluation 
+            // of the ancestors contract SPK also checked its ancestors.
             assert(prevTx0.outputContractSPK == ancestorTx0.outputContractSPK)
             assert(prevTx0.outputContractSPK == ancestorTx1.outputContractSPK)
             assert(prevTx0.outputContractSPK == ancestorTx2.outputContractSPK)
             assert(prevTx0.outputContractSPK == ancestorTx3.outputContractSPK)
         }
 
-        // Check that the prev outputs actually carry
-        // the specified amount of satoshis. The amount values
-        // can also carry aggregated amounts, in case we're not aggregating
-        // leaves anymore.
+        // Check that the prev outputs actually carry the specified amount 
+        // of satoshis. The amount values can also carry aggregated amounts, 
+        // in case we're not aggregating leaves anymore.
         assert(
             AggregatorUtils.padAmt(depositData0.amount) ==
             prevTx0.outputContractAmt
@@ -134,42 +149,45 @@ export class DepositAggregator extends SmartContract {
             prevTx1.outputContractAmt
         )
 
-        // Hash the hashes from the previous aggregation txns or leaves.
+        // Concatinate hashes from previous aggregation txns (or leaves)
+        // and compute new hash. Store this new hash in the state OP_RETURN
+        // output.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
-        const stateOut =
-            toByteString('000000000000000022') +
-            OpCode.OP_RETURN +
-            toByteString('20') +
-            newHash
+        const stateOut = AggregatorUtils.getStateOutput(newHash)
 
-
-        const outAmt = AggregatorUtils.padAmt(
-            depositData0.amount + depositData1.amount
+        // Sum up aggregated amounts and construct contract output.
+        const contractOut = AggregatorUtils.getContractOutput(
+            depositData0.amount + depositData1.amount,
+            prevTx0.outputContractSPK
         )
 
         // Recurse. Send to aggregator with updated hash.
-        const outputs = outAmt + prevTx0.outputContractSPK + stateOut
+        const outputs = contractOut + stateOut
         assert(
             sha256(outputs) == shPreimage.hashOutputs,
-            'hashOutputs mismatch'
         )
     }
 
     /**
-     * Merges the aggregation result into the bridge covenant.
+     * Finalizes the aggregation process by merging the aggregation result into the bridge covenant.
+     *
+     * @param shPreimage - Sighash preimage of the currently executing transaction.
+     * @param sigOperator - Signature of the bridge operator.
+     * @param prevTx - The previous aggregator transaction.
+     * @param ancestorTx0 - First ancestor transaction. These are used to inductively verify the transaction history.
+     * @param ancestorTx1 - Second ancestor transaction.
+     * @param bridgeTxId - TXID of the latest bridge instance.
+     * @param fundingPrevout - Prevout of funding UTXO.
      */
     @method()
     public finalize(
         shPreimage: SHPreimage,
-        sigOperator: Sig, // Signature of the bridge operator.
-        
+        sigOperator: Sig,
         prevTx: AggregatorTransaction,
-        
-        ancestorTx0: AggregatorTransaction, // Ancestor transactions need to be checked in order to inductively verify  
-        ancestorTx1: AggregatorTransaction, // the whole trees history.
-        
-        bridgeTxId: Sha256,                 // TXID of latest bridge instance.
-        fundingPrevout: ByteString,         // Prevout of input providing the funds to pay for the tx fees.
+        ancestorTx0: AggregatorTransaction,
+        ancestorTx1: AggregatorTransaction,
+        bridgeTxId: Sha256,
+        fundingPrevout: ByteString
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -177,29 +195,29 @@ export class DepositAggregator extends SmartContract {
 
         // Check operator sig.
         assert(this.checkSig(sigOperator, this.operator))
-        
+
         // Construct prev TX ID.
         const prevTxId = AggregatorUtils.getTxId(prevTx, false)
 
-        // Validate prev txns.
+        // Check this transaction unlocks specified outputs in the correct order.
         const hashPrevouts = AggregatorUtils.getHashPrevouts(
             bridgeTxId,
             prevTxId,
             fundingPrevout
         )
-        assert(hashPrevouts == shPreimage.hashPrevouts, 'hashPrevouts mismatch')
+        assert(hashPrevouts == shPreimage.hashPrevouts)
 
         // Make sure this is unlocked via second input.
         assert(shPreimage.inputNumber == toByteString('01000000'))
-        
+
         // Construct ancestor TX IDs.
         const ancestorTxId0 = AggregatorUtils.getTxId(ancestorTx0, false)
         const ancestorTxId1 = AggregatorUtils.getTxId(ancestorTx1, false)
-        
+
         // Check prevTx unlocks ancestorTx0 and ancestorTx1.
         assert(prevTx.inputContract0 == ancestorTxId0 + toByteString('0000000000ffffffff'))
         assert(prevTx.inputContract1 == ancestorTxId1 + toByteString('0000000000ffffffff'))
-        
+
         // Check ancestors have same contract SPK as prev tx.
         assert(prevTx.outputContractSPK == ancestorTx0.outputContractSPK)
         assert(prevTx.outputContractSPK == ancestorTx1.outputContractSPK)
@@ -209,7 +227,7 @@ export class DepositAggregator extends SmartContract {
         //       check that when "deposit()" is called, that the second input unlocks a deposit aggregator SPK.
     }
 
-    
+
     @method()
     static hashDepositData(depositData: DepositData): Sha256 {
         return hash256(
