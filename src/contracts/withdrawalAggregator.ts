@@ -9,12 +9,11 @@ import {
     PubKey,
     prop,
     ByteString,
-    Sha256,
-    OpCode,
-    len,
+    Sha256
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
+import { GeneralUtils } from './generalUtils'
 
 
 export type WithdrawalData = {
@@ -168,11 +167,11 @@ export class WithdrawalAggregator extends SmartContract {
         // and compute new hash. Store this new hash in the state OP_RETURN
         // output.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
-        const stateOut = AggregatorUtils.getStateOutput(newHash)
+        const stateOut = GeneralUtils.getStateOutput(newHash)
 
         // Construct contract output. Withdrawal aggregation needs only to carry
         // the minimum dust amount.
-        const contractOut = AggregatorUtils.getContractOutput(
+        const contractOut = GeneralUtils.getContractOutput(
             546n,
             prevTx0.outputContractSPK
         )
@@ -246,7 +245,7 @@ export class WithdrawalAggregator extends SmartContract {
     @method()
     static hashWithdrawalData(withdrawalData: WithdrawalData): Sha256 {
         return hash256(
-            withdrawalData.address + AggregatorUtils.padAmt(withdrawalData.amount)
+            withdrawalData.address + GeneralUtils.padAmt(withdrawalData.amount)
         )
     }
 

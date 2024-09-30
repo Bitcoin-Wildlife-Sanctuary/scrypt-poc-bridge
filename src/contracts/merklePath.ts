@@ -7,7 +7,7 @@ import {
     ByteString,
 } from 'scrypt-ts'
 
-export const MERKLE_PROOF_MAX_DEPTH = 8
+export const MERKLE_PROOF_MAX_DEPTH = 4
 
 /*
 Where the actual Merkle path is shorter than the predefined DEPTH, all trailing nodes will be marked as invalid.

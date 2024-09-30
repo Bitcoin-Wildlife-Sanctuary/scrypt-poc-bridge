@@ -33,7 +33,8 @@ describe('Test SmartContract `DepositAggregator`', () => {
     it('should pass', async () => {
         // Create Bridge instance to get SPK which is used in DepositAggregators constructor.
         const bridge = new Bridge(
-            PubKey(toByteString(pubkeyOperator.toString()))
+            PubKey(toByteString(pubkeyOperator.toString())),
+            toByteString('')
         )
         const scriptBridge = bridge.lockingScript
         const tapleafBridge = Tap.encodeScript(scriptBridge.toBuffer())

@@ -13,6 +13,7 @@ import {
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
+import { GeneralUtils } from './generalUtils'
 
 
 export type DepositData = {
@@ -141,11 +142,11 @@ export class DepositAggregator extends SmartContract {
         // of satoshis. The amount values can also carry aggregated amounts, 
         // in case we're not aggregating leaves anymore.
         assert(
-            AggregatorUtils.padAmt(depositData0.amount) ==
+            GeneralUtils.padAmt(depositData0.amount) ==
             prevTx0.outputContractAmt
         )
         assert(
-            AggregatorUtils.padAmt(depositData1.amount) ==
+            GeneralUtils.padAmt(depositData1.amount) ==
             prevTx1.outputContractAmt
         )
 
@@ -153,10 +154,10 @@ export class DepositAggregator extends SmartContract {
         // and compute new hash. Store this new hash in the state OP_RETURN
         // output.
         const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
-        const stateOut = AggregatorUtils.getStateOutput(newHash)
+        const stateOut = GeneralUtils.getStateOutput(newHash)
 
         // Sum up aggregated amounts and construct contract output.
-        const contractOut = AggregatorUtils.getContractOutput(
+        const contractOut = GeneralUtils.getContractOutput(
             depositData0.amount + depositData1.amount,
             prevTx0.outputContractSPK
         )
@@ -231,7 +232,7 @@ export class DepositAggregator extends SmartContract {
     @method()
     static hashDepositData(depositData: DepositData): Sha256 {
         return hash256(
-            depositData.address + AggregatorUtils.padAmt(depositData.amount)
+            depositData.address + GeneralUtils.padAmt(depositData.amount)
         )
     }
 
