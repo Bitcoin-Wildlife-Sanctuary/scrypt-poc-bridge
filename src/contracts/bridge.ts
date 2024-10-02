@@ -24,8 +24,11 @@ import { WithdrawalAggregator, WithdrawalData } from './withdrawalAggregator'
 export type BridgeTransaction = {
     ver: ByteString
     inputs: ByteString
-    outputContract: ByteString
-    accountsRoot: Sha256   // Root hash of accounts tree. Stored in OP_RETURN output.
+    contractSPK: ByteString
+    contractAmt: bigint
+    accountsRoot: Sha256                 // Root hash of accounts tree. Stored in OP_RETURN output.
+    expanderRoot: Sha256                 // Root hash of expander tree. Zero bytes if not withdrawal tx.
+    expanderAmt: bigint                  // Amount sent to exapander. Zero if not withrawal tx.
     depositAggregatorSPK: ByteString     // Aggregator SPK's are separated from the script 
     withdrawalAggregatorSPK: ByteString  // to avoid circular script hashes.
     locktime: ByteString
@@ -75,7 +78,7 @@ export class Bridge extends SmartContract {
         assert(this.checkSig(sigOperator, this.operator))
 
         // Construct prev txids.
-        const prevTxId = Bridge.getTxId(prevTx)
+        const prevTxId = this.getTxId(prevTx)
         const aggregatorTxId = AggregatorUtils.getTxId(aggregatorTx, false)
 
         // Check this transaction unlocks specified outputs in the correct order.
@@ -94,11 +97,17 @@ export class Bridge extends SmartContract {
 
         // Check deposit aggregation result and construct new accounts root.
         let accountsRootNew: Sha256 = prevTx.accountsRoot
+        let totalAmtDeposited = 0n
         for (let i = 0; i < MAX_NODES_AGGREGATED; i++) {
             const deposit = deposits[i]
             const hashDeposit = DepositAggregator.hashDepositData(deposit)
 
+            // Add amt to total.
+            totalAmtDeposited += deposit.amount
+
             // Check Merkle proof of deposit.
+            // TODO: Check if it is more efficient to construct whole deposit tree and check root,
+            //       instead of checking individual proofs.
             const depositProof = depositProofs[i]
             assert(MerklePath.calcMerkleRoot(hashDeposit, depositProof) == aggregatorTx.hashData)
 
@@ -135,25 +144,27 @@ export class Bridge extends SmartContract {
 
         }
 
-        // Update acccount state data with new root.
-        const accountStateOut = GeneralUtils.getStateOutput(accountsRootNew)
-        
-        // Also keep OP_RETURN outputs that store aggregator P2TR scripts in the next tx.
-        // Because aggregators also reference the bridges P2TR script we store these in separate 
-        // outputs instead of the witness script itself because we want to avoid circular hashes.
-        const depositAggregatorSPKStateOut = GeneralUtils.getSPKStateOutput(prevTx.depositAggregatorSPK)
-        const withdrawalAggregatorSPKStateOut = GeneralUtils.getSPKStateOutput(prevTx.depositAggregatorSPK)
+        // Create new contract output.
+        // Add total amount deposited to the bridge output balance.
+        const contractOut = GeneralUtils.getContractOutput(
+            prevTx.contractAmt + totalAmtDeposited, 
+            prevTx.contractSPK
+        )
+
+        // Create state output with new state hash.
+        const stateHash = Bridge.getStateHash(
+            accountsRootNew, prevTx.depositAggregatorSPK, prevTx.withdrawalAggregatorSPK, toByteString('')
+        )
+        const conractStateOut = GeneralUtils.getStateOutput(stateHash)
 
         // Enforce outputs.
         const hashOutputs = sha256(
-            prevTx.outputContract +
-            accountStateOut +
-            depositAggregatorSPKStateOut +
-            withdrawalAggregatorSPKStateOut
+            contractOut +
+            conractStateOut
         )
         assert(hashOutputs == shPreimage.hashOutputs)
     }
-    
+
     @method()
     public withdrawal(
         shPreimage: SHPreimage,
@@ -175,7 +186,7 @@ export class Bridge extends SmartContract {
         assert(this.checkSig(sigOperator, this.operator))
 
         // Construct prev txids.
-        const prevTxId = Bridge.getTxId(prevTx)
+        const prevTxId = this.getTxId(prevTx)
         const aggregatorTxId = AggregatorUtils.getTxId(aggregatorTx, false)
 
         // Check this transaction unlocks specified outputs in the correct order.
@@ -193,12 +204,14 @@ export class Bridge extends SmartContract {
         assert(prevTx.withdrawalAggregatorSPK == aggregatorTx.outputContractSPK)
 
         // Check withdrawal request aggregation result and construct new accounts root.
-        // TODO: Additionally package data for the expander covenant which will pass funds to
-        // the requested accounts addresses.
         let accountsRootNew: Sha256 = prevTx.accountsRoot
+        let totalAmtWithdrawn = 0n
         for (let i = 0; i < MAX_NODES_AGGREGATED; i++) {
             const withdrawal = withdrawals[i]
             const hashWithdrawal = WithdrawalAggregator.hashWithdrawalData(withdrawal)
+
+            // Add to total amt withrawn.
+            totalAmtWithdrawn += withdrawal.amount
 
             // Check Merkle proof of deposit.
             const withdrawalProof = withdrawalProofs[i]
@@ -226,27 +239,36 @@ export class Bridge extends SmartContract {
                 address: accountDataCurrent.address,
                 balance: accountDataCurrent.balance - withdrawal.amount
             }
+            assert(accountDataUpdated.balance >= 0n)
             accountsRootNew = MerklePath.calcMerkleRoot(
                 Bridge.hashAccountData(accountDataUpdated),
                 accountProof
             )
         }
 
-        // Update acccount state data with new root.
-        const accountStateOut = GeneralUtils.getStateOutput(accountsRootNew)
-        
-        // Also keep OP_RETURN outputs that store aggregator P2TR scripts in the next tx.
-        // Because aggregators also reference the bridges P2TR script we store these in separate 
-        // outputs instead of the witness script itself because we want to avoid circular hashes.
-        const depositAggregatorSPKStateOut = GeneralUtils.getSPKStateOutput(prevTx.depositAggregatorSPK)
-        const withdrawalAggregatorSPKStateOut = GeneralUtils.getSPKStateOutput(prevTx.depositAggregatorSPK)
+        // Substract total amount withrawn of the bridge output balance.
+        const contractOut = GeneralUtils.getContractOutput(
+            prevTx.contractAmt - totalAmtWithdrawn,
+            prevTx.contractSPK
+        )
+
+        // Create state output with new state hash.
+        const stateHash = Bridge.getStateHash(
+            accountsRootNew, prevTx.depositAggregatorSPK, prevTx.withdrawalAggregatorSPK, aggregatorTx.hashData
+        )
+        const conractStateOut = GeneralUtils.getStateOutput(stateHash)
+
+        // Create an expander P2TR output which carries the total amount withrawn.
+        const expanderOut = GeneralUtils.getContractOutput(
+            totalAmtWithdrawn,
+            this.expanderSPK
+        )
 
         // Enforce outputs.
         const hashOutputs = sha256(
-            prevTx.outputContract +
-            accountStateOut +
-            depositAggregatorSPKStateOut +
-            withdrawalAggregatorSPKStateOut
+            contractOut +
+            conractStateOut +
+            expanderOut
         )
         assert(hashOutputs == shPreimage.hashOutputs)
     }
@@ -259,16 +281,22 @@ export class Bridge extends SmartContract {
     }
 
     @method()
-    static getTxId(tx: BridgeTransaction): Sha256 {
+    private getTxId(tx: BridgeTransaction): Sha256 {
+        const nOutputs = tx.expanderRoot == toByteString('') ?
+            toByteString('02') : toByteString('03')
+        const stateHash = Bridge.getStateHash(
+            tx.accountsRoot, tx.depositAggregatorSPK, tx.withdrawalAggregatorSPK, tx.expanderRoot
+        )
+        const expanderOut = tx.expanderRoot == toByteString('') ?
+            toByteString('') : GeneralUtils.getContractOutput(tx.expanderAmt, this.expanderSPK)
+
         return hash256(
             tx.ver +
             tx.inputs +
-            toByteString('02') +
-            tx.outputContract +
-            toByteString('000000000000000022') +
-            OpCode.OP_RETURN +
-            toByteString('20') +
-            tx.accountsRoot +
+            nOutputs +
+            GeneralUtils.getContractOutput(tx.contractAmt, tx.contractSPK) +
+            GeneralUtils.getStateOutput(stateHash) +
+            expanderOut +
             tx.locktime
         )
     }
@@ -287,5 +315,26 @@ export class Bridge extends SmartContract {
             feePrevout
         )
     }
-    
+
+    /**
+     * Creates bridge state hash, stored in an OP_RETURN output.
+     *
+     * @param accountsRoot - Merkle root of bridges account tree.
+     * @param depositAggregatorSPK - Deposit aggregator SPK.
+     * @param withdrawalAggregatorSPK - Withdrawal aggregator SPK.
+     * @param expanderRoot - Merkle root for expander covenant. Zero bytes if not withdrawal tx.
+     * @returns 
+     */
+    @method()
+    static getStateHash(
+        accountsRoot: Sha256,
+        depositAggregatorSPK: ByteString,
+        withdrawalAggregatorSPK: ByteString,
+        expanderRoot: ByteString
+    ): Sha256 {
+        return hash256(
+            accountsRoot + depositAggregatorSPK + withdrawalAggregatorSPK + expanderRoot
+        )
+    }
+
 }

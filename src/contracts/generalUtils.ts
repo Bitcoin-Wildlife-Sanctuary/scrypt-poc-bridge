@@ -34,15 +34,5 @@ export class GeneralUtils extends SmartContractLib {
         assert(len(spk) == 35n)
         return GeneralUtils.padAmt(amt) + spk
     }
-    
-    @method()
-    static getSPKStateOutput(spk: ByteString): ByteString {
-        return toByteString('0000000000000000') + // Output satoshis (0 sats)
-            toByteString('23') +               // Script lenght (35 bytes)
-            OpCode.OP_RETURN +
-            toByteString('21') +               // P2TR SPK length (33 bytes)
-            spk
-    }
-
 
 }

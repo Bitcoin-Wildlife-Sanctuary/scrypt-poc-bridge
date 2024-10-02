@@ -8,7 +8,7 @@ export type AggregatorTransaction = {
     inputFee: ByteString
     outputContractAmt: ByteString
     outputContractSPK: ByteString
-    hashData: ByteString // Hash of state data, stored in OP_RETURN output.
+    hashData: Sha256 // Hash of state data, stored in OP_RETURN output.
     locktime: ByteString
 }
 
