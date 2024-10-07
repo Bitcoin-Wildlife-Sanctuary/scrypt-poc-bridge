@@ -9,7 +9,7 @@ import { expect, use } from 'chai'
 import chaiAsPromised from 'chai-as-promised'
 use(chaiAsPromised)
 
-import { WithdrawalAggregator, WithdrawalData } from '../src/contracts/withdrawalAggregator'
+import { AggregationData, WithdrawalAggregator, WithdrawalData } from '../src/contracts/withdrawalAggregator'
 import { Bridge } from '../src/contracts/bridge'
 import { hash256, PubKey, Sha256, toByteString } from 'scrypt-ts';
 import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, schnorrTrick } from './utils/txHelper';
@@ -77,7 +77,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         console.log('txFee (serialized):', txFunds.uncheckedSerialize())
         console.log('')
 
-        
+
         ////////////////////////////////////////////////////////////////////
         //////// Construct 4x leaf withdrawal request transactions. ////////
         ////////////////////////////////////////////////////////////////////
@@ -144,7 +144,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             console.log('')
         }
 
-        
+
         //////////////////////////////////////////
         //////// Merge leaf 0 and leaf 1. ////////
         //////////////////////////////////////////
@@ -167,8 +167,16 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             script: new btc.Script(myAddress),
             satoshis: txFunds.outputs[4].satoshis
         }
+        
 
-        const aggregateHash0 = hash256(withdrawalDataHashList[0] + withdrawalDataHashList[1])
+        const aggregationData0: AggregationData = {
+            prevH0: withdrawalDataHashList[0],
+            prevH1: withdrawalDataHashList[1],
+            sumAmt: withdrawalDataList[0].amount + withdrawalDataList[1].amount
+        }
+        const aggregateHash0 = WithdrawalAggregator.hashAggregationData(
+            aggregationData0
+        )
         let opRetScript = new btc.Script(`6a20${aggregateHash0}`)
 
         const aggregateTx0 = new btc.Transaction()
@@ -347,6 +355,13 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             withdrawalData1AddressBuff,
             withdrawalData1AmtBuff,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
             scriptAggregator.toBuffer(),
@@ -450,6 +465,13 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             withdrawalData1AddressBuff,
             withdrawalData1AmtBuff,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
             scriptAggregator.toBuffer(),
@@ -470,7 +492,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         res = interpreter.verify(new btc.Script(''), leafTxns[1].outputs[0].script, aggregateTx0, 1, flags, witnessesIn1, leafTxns[1].outputs[0].satoshis)
         expect(res).to.be.true
 
-        
+
         //////////////////////////////////////////
         //////// Merge leaf 2 and leaf 3. ////////
         //////////////////////////////////////////
@@ -494,8 +516,15 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             satoshis: txFunds.outputs[5].satoshis
         }
 
-        const aggregateHash1 = hash256(withdrawalDataHashList[2] + withdrawalDataHashList[3])
-        opRetScript = new btc.Script(`6a20${aggregateHash1}`)
+        const aggregationData1: AggregationData = {
+            prevH0: withdrawalDataHashList[2],
+            prevH1: withdrawalDataHashList[3],
+            sumAmt: withdrawalDataList[2].amount + withdrawalDataList[3].amount
+        }
+        const aggregateHash1 = WithdrawalAggregator.hashAggregationData(
+            aggregationData1
+        )
+        opRetScript = new btc.Script(`6a20${aggregateHash0}`)
 
         const aggregateTx1 = new btc.Transaction()
             .from(
@@ -673,6 +702,13 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             withdrawalData1AddressBuff,
             withdrawalData1AmtBuff,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
             scriptAggregator.toBuffer(),
@@ -776,6 +812,13 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             withdrawalData1AddressBuff,
             withdrawalData1AmtBuff,
 
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
             scriptAggregator.toBuffer(),
@@ -794,7 +837,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         res = interpreter.verify(new btc.Script(''), leafTxns[3].outputs[0].script, aggregateTx1, 1, flags, witnessesIn1, leafTxns[3].outputs[0].satoshis)
         expect(res).to.be.true
 
-        
+
         ////////////////////////////////////////////
         //////// Merge two aggregate nodes. ////////
         ////////////////////////////////////////////
@@ -818,7 +861,12 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             satoshis: txFunds.outputs[7].satoshis
         }
 
-        const aggregateHash2 = hash256(aggregateHash0 + aggregateHash1)
+        const aggregationData2: AggregationData = {
+            prevH0: aggregateHash0,
+            prevH1: aggregateHash1,
+            sumAmt: aggregationData0.sumAmt + aggregationData1.sumAmt
+        }
+        const aggregateHash2 = WithdrawalAggregator.hashAggregationData(aggregationData2)
         opRetScript = new btc.Script(`6a20${aggregateHash2}`)
 
         const aggregateTx2 = new btc.Transaction()
@@ -874,7 +922,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         prevTx1ContractAmt.writeUInt32LE(aggregateTx1.outputs[0].satoshis)
         prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
         prevTx1HashData = aggregateHash1
-        
+
         let ancestorTx0Ver = Buffer.alloc(4)
         ancestorTx0Ver.writeUInt32LE(leafTxns[0].version)
         let ancestorTx0Locktime = Buffer.alloc(4)
@@ -896,7 +944,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         ancestorTx1ContractAmt.writeUInt32LE(leafTxns[1].outputs[0].satoshis)
         let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
         let ancestorTx1HashData = withdrawalDataHashList[1]
-        
+
         let ancestorTx2Ver = Buffer.alloc(4)
         ancestorTx2Ver.writeUInt32LE(leafTxns[2].version)
         let ancestorTx2Locktime = Buffer.alloc(4)
@@ -922,6 +970,15 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         fundingPrevout = new btc.encoding.BufferWriter()
         fundingPrevout.writeReverse(aggregateTx2.inputs[2].prevTxId);
         fundingPrevout.writeInt32LE(aggregateTx2.inputs[2].outputIndex);
+        
+        let prevTx0PrevH0 = aggregationData0.prevH0
+        let prevTx0PrevH1 = aggregationData0.prevH1
+        let prevTx0SumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTx0SumAmt.writeInt16LE(Number(aggregationData0.sumAmt))
+        let prevTx1PrevH0 = aggregationData1.prevH0
+        let prevTx1PrevH1 = aggregationData1.prevH1
+        let prevTx1SumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTx1SumAmt.writeInt16LE(Number(aggregationData1.sumAmt))
 
         witnessesIn0 = [
             schnorrTrickDataIn0.preimageParts.txVersion,
@@ -960,7 +1017,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             prevTx1ContractSPK,
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
-            
+
             ancestorTx0Ver,
             Buffer.from('', 'hex'),
             Buffer.from('', 'hex'),
@@ -1014,10 +1071,17 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             fundingPrevout.toBuffer(),
             Buffer.from('01', 'hex'), // is first input (true)
 
-            Buffer.from(''),
-            Buffer.from(''),
-            Buffer.from(''),
-            Buffer.from(''),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+
+            Buffer.from(prevTx0PrevH0, 'hex'),
+            Buffer.from(prevTx0PrevH1, 'hex'),
+            prevTx0SumAmt,
+            Buffer.from(prevTx1PrevH0, 'hex'),
+            Buffer.from(prevTx1PrevH1, 'hex'),
+            prevTx1SumAmt,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 
@@ -1063,7 +1127,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             prevTx1ContractSPK,
             Buffer.from(prevTx1HashData, 'hex'),
             prevTx1Locktime,
-            
+
             ancestorTx0Ver,
             Buffer.from('', 'hex'),
             Buffer.from('', 'hex'),
@@ -1116,11 +1180,18 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
 
             fundingPrevout.toBuffer(),
             Buffer.from('', 'hex'), // is first input (false)
+            
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
+            Buffer.from('', 'hex'),
 
-            Buffer.from(''),
-            Buffer.from(''),
-            Buffer.from(''),
-            Buffer.from(''),
+            Buffer.from(prevTx0PrevH0, 'hex'),
+            Buffer.from(prevTx0PrevH1, 'hex'),
+            prevTx0SumAmt,
+            Buffer.from(prevTx1PrevH0, 'hex'),
+            Buffer.from(prevTx1PrevH1, 'hex'),
+            prevTx1SumAmt,
 
             Buffer.from('', 'hex'), // OP_0 - first public method chosen
 

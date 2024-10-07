@@ -16,9 +16,16 @@ import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
 import { GeneralUtils } from './generalUtils'
 
 
+// TODO: rename to WithdrawalRequest?
 export type WithdrawalData = {
     address: Sha256
     amount: bigint
+}
+
+export type AggregationData = {
+    prevH0: Sha256,
+    prevH1: Sha256,
+    sumAmt: bigint
 }
 
 export type OwnershipProofTransaction = {
@@ -67,6 +74,8 @@ export class WithdrawalAggregator extends SmartContract {
      * @param isFirstInput - Indicates whether this method is called from the first or second input.
      * @param withdrawalData0 - Actual data of the first withdrawal request; used when aggregating leaves.
      * @param withdrawalData1 - Actual data of the second withdrawal request; used when aggregating leaves.
+     * @param aggreagationData0 - Actual data of the first previous aggregation step.
+     * @param aggreagationData1 - Actual data of the second previout aggregation step.
      */
     @method()
     public aggregate(
@@ -85,7 +94,9 @@ export class WithdrawalAggregator extends SmartContract {
         fundingPrevout: ByteString,
         isFirstInput: boolean,
         withdrawalData0: WithdrawalData,
-        withdrawalData1: WithdrawalData
+        withdrawalData1: WithdrawalData,
+        aggregationData0: AggregationData,
+        aggregationData1: AggregationData,
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -105,10 +116,10 @@ export class WithdrawalAggregator extends SmartContract {
             fundingPrevout
         )
         assert(hashPrevouts == shPreimage.hashPrevouts)
-        
+
         // Check prev txns SPK match.
         assert(prevTx0.outputContractSPK == prevTx1.outputContractSPK)
-        
+
         // Check isFirstInput flag is valid.
         if (isFirstInput) {
             assert(shPreimage.inputNumber == toByteString('00000000'))
@@ -116,14 +127,14 @@ export class WithdrawalAggregator extends SmartContract {
             assert(shPreimage.inputNumber == toByteString('01000000'))
         }
 
+        let sumAmt = 0n
         if (isPrevTxLeaf) {
             // If prev txns are leaves, check that the hash in their state
             // OP_RETURN output corresponds to the data passed in as witnesses.
             const hashData0 = WithdrawalAggregator.hashWithdrawalData(withdrawalData0)
             const hashData1 = WithdrawalAggregator.hashWithdrawalData(withdrawalData1)
-
             assert(hashData0 == prevTx0.hashData)
-            assert(hashData1 == prevTx0.hashData)
+            assert(hashData1 == prevTx1.hashData)
 
             // Construct ownership proof txids.
             const ownershipProofTxId0 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx0)
@@ -137,7 +148,17 @@ export class WithdrawalAggregator extends SmartContract {
             // Check withdrawal data addresses are the same as ownership proof txns payed to.
             assert(withdrawalData0.address == ownProofTx0.outputAddrP2WPKH)
             assert(withdrawalData1.address == ownProofTx1.outputAddrP2WPKH)
+
+            // Set sum amount of withdrawal requests.
+            sumAmt = withdrawalData0.amount + withdrawalData1.amount
         } else {
+            // Check that the passed aggreagtion data corresponds to the actual data in
+            // prev aggregation transactions states.
+            const hashData0 = WithdrawalAggregator.hashAggregationData(aggregationData0)
+            const hashData1 = WithdrawalAggregator.hashAggregationData(aggregationData1)
+            assert(hashData0 == prevTx0.hashData)
+            assert(hashData1 == prevTx1.hashData)
+
             // If we're higher up the aggregation tree, we need to check ancestor
             // transactions in order to inductively validate the whole tree.
             const ancestorTxId0 = AggregatorUtils.getTxId(ancestorTx0, isAncestorLeaf)
@@ -161,12 +182,20 @@ export class WithdrawalAggregator extends SmartContract {
             assert(prevTx0.outputContractSPK == ancestorTx1.outputContractSPK)
             assert(prevTx0.outputContractSPK == ancestorTx2.outputContractSPK)
             assert(prevTx0.outputContractSPK == ancestorTx3.outputContractSPK)
+
+            // Set sum of previous two sum amounts.
+            sumAmt = aggregationData0.sumAmt + aggregationData1.sumAmt
         }
 
-        // Concatinate hashes from previous aggregation txns (or leaves)
-        // and compute new hash. Store this new hash in the state OP_RETURN
-        // output.
-        const newHash = hash256(prevTx0.hashData + prevTx1.hashData)
+        // Concatinate hashes from previous aggregation txns (or leaves) 
+        // and sum of funds to withdraw and compute new hash. 
+        // Store this new hash in the state OP_RETURN output.
+        const newAggregationData: AggregationData = {
+            prevH0: prevTx0.hashData,
+            prevH1: prevTx1.hashData,
+            sumAmt
+        }
+        const newHash = WithdrawalAggregator.hashAggregationData(newAggregationData)
         const stateOut = GeneralUtils.getStateOutput(newHash)
 
         // Construct contract output. Withdrawal aggregation needs only to carry
@@ -246,6 +275,15 @@ export class WithdrawalAggregator extends SmartContract {
     static hashWithdrawalData(withdrawalData: WithdrawalData): Sha256 {
         return hash256(
             withdrawalData.address + GeneralUtils.padAmt(withdrawalData.amount)
+        )
+    }
+
+    @method()
+    static hashAggregationData(aggregationData: AggregationData): Sha256 {
+        return hash256(
+            aggregationData.prevH0 +
+            aggregationData.prevH1 +
+            GeneralUtils.padAmt(aggregationData.sumAmt)
         )
     }
 

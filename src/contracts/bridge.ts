@@ -10,7 +10,6 @@ import {
     prop,
     ByteString,
     Sha256,
-    OpCode,
     FixedArray,
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
@@ -25,6 +24,7 @@ export type BridgeTransaction = {
     ver: ByteString
     inputs: ByteString
     contractSPK: ByteString
+    expanderSPK: ByteString
     contractAmt: bigint
     accountsRoot: Sha256                 // Root hash of accounts tree. Stored in OP_RETURN output.
     expanderRoot: Sha256                 // Root hash of expander tree. Zero bytes if not withdrawal tx.
@@ -288,7 +288,8 @@ export class Bridge extends SmartContract {
             tx.accountsRoot, tx.depositAggregatorSPK, tx.withdrawalAggregatorSPK, tx.expanderRoot
         )
         const expanderOut = tx.expanderRoot == toByteString('') ?
-            toByteString('') : GeneralUtils.getContractOutput(tx.expanderAmt, this.expanderSPK)
+            toByteString('') : GeneralUtils.getContractOutput(tx.expanderAmt, tx.expanderSPK)
+        assert(tx.expanderSPK == this.expanderSPK)
 
         return hash256(
             tx.ver +
