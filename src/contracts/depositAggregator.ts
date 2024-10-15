@@ -165,7 +165,7 @@ export class DepositAggregator extends SmartContract {
         // Recurse. Send to aggregator with updated hash.
         const outputs = contractOut + stateOut
         assert(
-            sha256(outputs) == shPreimage.hashOutputs,
+            sha256(outputs) == shPreimage.hashOutputs
         )
     }
 
@@ -222,10 +222,6 @@ export class DepositAggregator extends SmartContract {
         // Check ancestors have same contract SPK as prev tx.
         assert(prevTx.outputContractSPK == ancestorTx0.outputContractSPK)
         assert(prevTx.outputContractSPK == ancestorTx1.outputContractSPK)
-
-        // TODO: How to also make sure that the main state covenant calls the right "deposit()" method?
-        //       I think this has to be done by the state covenant itself. I.e. the state covenant should also
-        //       check that when "deposit()" is called, that the second input unlocks a deposit aggregator SPK.
     }
 
 

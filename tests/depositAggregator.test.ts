@@ -36,6 +36,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
             PubKey(toByteString(pubkeyOperator.toString())),
             toByteString('')
         )
+        
         const scriptBridge = bridge.lockingScript
         const tapleafBridge = Tap.encodeScript(scriptBridge.toBuffer())
 

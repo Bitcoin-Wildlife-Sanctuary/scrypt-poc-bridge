@@ -15,7 +15,7 @@ export class GeneralUtils extends SmartContractLib {
         } else if (amt < 0x01000000n) {
             res += toByteString('0000000000')
         } else {
-            assert(false, 'bad amt')
+            assert(false)
         }
         return res
     }

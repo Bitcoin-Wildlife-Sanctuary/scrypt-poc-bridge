@@ -1,8 +1,7 @@
 import { assert, ByteString, hash256, method, prop, PubKey, sha256, Sha256, Sig, SmartContract, toByteString } from "scrypt-ts";
 import { SHPreimage, SigHashUtils } from "./sigHashUtils";
 import { Bridge, BridgeTransaction } from "./bridge";
-import { WithdrawalData } from "./withdrawalAggregator";
-import { AggregatorUtils } from "./aggregatorUtils";
+import { AggregationData, WithdrawalAggregator, WithdrawalData } from "./withdrawalAggregator";
 import { GeneralUtils } from "./generalUtils";
 
 
@@ -13,8 +12,7 @@ export type ExpanderTransaction = {
     expanderSPK: ByteString
     output0Amt: bigint
     output1Amt: bigint
-    hashData0: Sha256
-    hashData1: Sha256
+    hashData: Sha256
     locktime: ByteString
 }
 
@@ -31,6 +29,24 @@ export class WithdrawalExpander extends SmartContract {
     }
 
 
+    /**
+     * Expands current node of exapnsion tree into further two nodes or leaves.
+     * 
+     * @param shPreimage - Sighash preimage of the currently executing transaction.
+     * @param sigOperator - Signature of bridge operator.
+     * @param isExpandingPrevTxFirstOutput - Indicates wether expanding first or second output (i.e. branch).
+     * @param isPrevTxBridge - Indicates wether prev tx is the bridge.
+     * @param prevTxBridge - Previous bridge tx data. Ignored if prev tx not bridge.
+     * @param prevTxExpander - Previous expander tx data. Ignored if prev tx is bridge.
+     * @param prevAggregationData - Aggregation data of previous transaction.
+     * @param currentAggregationData  - Aggregation data of current trnasaction.
+     * @param nextAggregationData0 - Subsequent aggregation data of first branch.
+     * @param nextAggregationData1 - Subsequent aggregation data of second branch.
+     * @param isExpandingLeaves - Indicates wether we're exapnding into leaves.
+     * @param withdrawalData0 - Withdrawal data of fist leaf. Ignored if not expanding into leaves.
+     * @param withdrawalData1 - Withdrawal data of second leaf. Ignored if not expanding into leaves.
+     * @param fundingPrevout - The prevout for the funding UTXO.
+     */
     @method()
     public expand(
         shPreimage: SHPreimage,
@@ -40,6 +56,11 @@ export class WithdrawalExpander extends SmartContract {
         isPrevTxBridge: boolean,
         prevTxBridge: BridgeTransaction,
         prevTxExpander: ExpanderTransaction,
+
+        prevAggregationData: AggregationData,
+        currentAggregationData: AggregationData,
+        nextAggregationData0: AggregationData,
+        nextAggregationData1: AggregationData,
 
         isExpandingLeaves: boolean,
         withdrawalData0: WithdrawalData,
@@ -61,37 +82,107 @@ export class WithdrawalExpander extends SmartContract {
         } else {
             prevTxId = WithdrawalExpander.getTxId(prevTxExpander)
         }
-        
+
         // Check passed prev tx is actually unlocked by the currently executing tx.
         const hashPrevouts = WithdrawalExpander.getHashPrevouts(
             prevTxId,
             fundingPrevout
         )
         assert(hashPrevouts == shPreimage.hashPrevouts)
-        
+
         // Check we're unlocking contract UTXO via the first input.
         assert(shPreimage.inputNumber == toByteString('00000000'))
-        
-        
 
+        // Get root hash from prev txns state output.
+        let rootHash = toByteString('')
+        if (isPrevTxBridge) {
+            rootHash = prevTxBridge.expanderRoot
+        } else {
+            rootHash = prevTxExpander.hashData
+        }
+        // Check passed prev aggregation data matches the root hash.
+        assert(
+            WithdrawalAggregator.hashAggregationData(prevAggregationData) == rootHash
+        )
+
+        let hashOutputs = toByteString('')
+        if (isExpandingLeaves) {
+            // If leaves, check passed withdrawal data matches hashes in prev 
+            // aggregation data. Enforce P2WPKH output with the address
+            // and amount from this withdrawal data.
+            // Address is chosen depending on isExpandingPrevTxFirstOutput.
+            if (isExpandingPrevTxFirstOutput) {
+                const hashWithdrawalData = WithdrawalAggregator.hashWithdrawalData(withdrawalData0)
+                assert(hashWithdrawalData == prevAggregationData.prevH0)
+                hashOutputs = sha256(
+                    WithdrawalExpander.getP2WPKHOut(
+                        GeneralUtils.padAmt(withdrawalData0.amount),
+                        withdrawalData0.address
+                    )
+                )
+            } else {
+                const hashWithdrawalData = WithdrawalAggregator.hashWithdrawalData(withdrawalData1)
+                assert(hashWithdrawalData == prevAggregationData.prevH1)
+                hashOutputs = sha256(
+                    WithdrawalExpander.getP2WPKHOut(
+                        GeneralUtils.padAmt(withdrawalData1.amount),
+                        withdrawalData1.address
+                    )
+                )
+            }
+        } else {
+            // Bring in current aggregation data and check
+            // that it matches the hash from the prev aggregation data.
+            // Hash is chosen depending on isExpandingPrevTxFirstOutput.
+            const hashCurrentAggregationData = WithdrawalAggregator.hashAggregationData(currentAggregationData)
+            if (isExpandingPrevTxFirstOutput) {
+                assert(hashCurrentAggregationData == prevAggregationData.prevH0)
+            } else {
+                assert(hashCurrentAggregationData == prevAggregationData.prevH1)
+            }
+
+            // Bring in 2x next aggregation data for both branches.
+            // Check that they both hash to the hashes in current aggregation data.
+            // Extract amounts from these two and enforce two new expander outputs
+            // and a state with the hash of the current aggregation data.
+            const hashNextAggregationData0 = WithdrawalAggregator.hashAggregationData(nextAggregationData0)
+            const hashNextAggregationData1 = WithdrawalAggregator.hashAggregationData(nextAggregationData1)
+            assert(hashNextAggregationData0 == currentAggregationData.prevH0)
+            assert(hashNextAggregationData1 == currentAggregationData.prevH1)
+
+            let expanderSPK = prevTxExpander.expanderSPK
+            if (isPrevTxBridge) {
+                expanderSPK = prevTxBridge.expanderSPK
+            }
+
+            hashOutputs = sha256(
+                GeneralUtils.getContractOutput(nextAggregationData0.sumAmt, expanderSPK) +
+                GeneralUtils.getContractOutput(nextAggregationData1.sumAmt, expanderSPK) +
+                GeneralUtils.getStateOutput(hashCurrentAggregationData)
+            )
+
+        }
+
+        assert(
+            hashOutputs == shPreimage.hashOutputs
+        )
     }
 
     @method()
     static getTxId(tx: ExpanderTransaction): Sha256 {
-        const stateHash = WithdrawalExpander.getStateHash(tx.hashData0, tx.hashData1)
         return hash256(
             tx.ver +
             toByteString('02') +
             tx.inputContract +
-            tx.inputFee + 
+            tx.inputFee +
             toByteString('03') +
             GeneralUtils.getContractOutput(tx.output0Amt, tx.expanderSPK) +
             GeneralUtils.getContractOutput(tx.output1Amt, tx.expanderSPK) +
-            GeneralUtils.getStateOutput(stateHash) +
+            GeneralUtils.getStateOutput(tx.hashData) +
             tx.locktime
         )
     }
-    
+
     @method()
     static getBridgeTxId(tx: BridgeTransaction): Sha256 {
         const stateHash = Bridge.getStateHash(
@@ -107,7 +198,7 @@ export class WithdrawalExpander extends SmartContract {
             tx.locktime
         )
     }
-    
+
     @method()
     static getHashPrevouts(
         txId: Sha256,
@@ -119,13 +210,13 @@ export class WithdrawalExpander extends SmartContract {
             feePrevout
         )
     }
-    
+
     @method()
-    static getStateHash(
-        hash0: Sha256,
-        hash1: Sha256
-    ): Sha256 {
-        return hash256(hash0 + hash1) 
+    static getP2WPKHOut(
+        amount: ByteString,
+        addr: ByteString
+    ): ByteString {
+        return amount + toByteString('160014') + addr
     }
 
 }

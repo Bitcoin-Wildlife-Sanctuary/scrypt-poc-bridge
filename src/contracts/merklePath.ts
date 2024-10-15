@@ -28,6 +28,8 @@ export type Node = {
 
 export type MerkleProof = FixedArray<Node, typeof MERKLE_PROOF_MAX_DEPTH> // If shorter than max depth, pad with invalid nodes.
 
+export type IntermediateValues = FixedArray<ByteString, typeof MERKLE_PROOF_MAX_DEPTH>
+
 export class MerklePath extends SmartContractLib {
 
     /**
@@ -48,6 +50,29 @@ export class MerklePath extends SmartContractLib {
                     node.pos == NodePos.Left
                         ? Sha256(hash256(node.hash + root))
                         : Sha256(hash256(root + node.hash))
+            }
+        }
+
+        return root
+    }
+
+    @method()
+    static calcMerkleRootWIntermediateValues(
+        leaf: Sha256,
+        merkleProof: MerkleProof,
+        intermediateValues: IntermediateValues
+    ): Sha256 {
+        let root = leaf
+
+        for (let i = 0; i < MERKLE_PROOF_MAX_DEPTH; i++) {
+            const node = merkleProof[i]
+            if (node.pos != NodePos.Invalid) {
+                // s is valid
+                const intermediateValue = intermediateValues[i]
+                root =
+                    node.pos == NodePos.Left
+                        ? Sha256(hash256(node.hash + root + intermediateValue))
+                        : Sha256(hash256(root + node.hash + intermediateValue))
             }
         }
 

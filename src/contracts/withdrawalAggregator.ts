@@ -265,10 +265,6 @@ export class WithdrawalAggregator extends SmartContract {
         // Check ancestors have same contract SPK as prev tx.
         assert(prevTx.outputContractSPK == ancestorTx0.outputContractSPK)
         assert(prevTx.outputContractSPK == ancestorTx1.outputContractSPK)
-
-        // TODO: How to also make sure that the main state covenant calls the right "withdrawal()" method?
-        //       I think this has to be done by the state covenant itself. I.e. the state covenant should also
-        //       check that when "withdrawal()" is called, that the second input unlocks a withdrawal aggregator SPK.
     }
 
     @method()

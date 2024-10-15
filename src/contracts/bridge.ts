@@ -15,7 +15,7 @@ import {
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
 import { DepositAggregator, DepositData } from './depositAggregator'
-import { MerklePath, MerkleProof } from './merklePath'
+import { IntermediateValues, MerklePath, MerkleProof } from './merklePath'
 import { GeneralUtils } from './generalUtils'
 import { WithdrawalAggregator, WithdrawalData } from './withdrawalAggregator'
 
@@ -147,7 +147,7 @@ export class Bridge extends SmartContract {
         // Create new contract output.
         // Add total amount deposited to the bridge output balance.
         const contractOut = GeneralUtils.getContractOutput(
-            prevTx.contractAmt + totalAmtDeposited, 
+            prevTx.contractAmt + totalAmtDeposited,
             prevTx.contractSPK
         )
 
@@ -175,6 +175,7 @@ export class Bridge extends SmartContract {
 
         withdrawals: FixedArray<WithdrawalData, typeof MAX_NODES_AGGREGATED>,
         withdrawalProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>,
+        intermediateSumsArr: FixedArray<IntermediateValues, typeof MAX_NODES_AGGREGATED>,
         accounts: FixedArray<AccountData, typeof MAX_NODES_AGGREGATED>,
         accountProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>
     ) {
@@ -213,9 +214,13 @@ export class Bridge extends SmartContract {
             // Add to total amt withrawn.
             totalAmtWithdrawn += withdrawal.amount
 
-            // Check Merkle proof of deposit.
-            const withdrawalProof = withdrawalProofs[i]
-            assert(MerklePath.calcMerkleRoot(hashWithdrawal, withdrawalProof) == aggregatorTx.hashData)
+            // Check Merkle proof of deposit. Intermediate sums of withdrawal amounts
+            // are also included. Those are needed in the expansion process.
+            assert(
+                MerklePath.calcMerkleRootWIntermediateValues(
+                    hashWithdrawal, withdrawalProofs[i], intermediateSumsArr[i]
+                ) == aggregatorTx.hashData
+            )
 
             // Check withrawal is made for the matching account.
             const accountDataCurrent = accounts[i]
