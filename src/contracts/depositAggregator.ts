@@ -111,7 +111,7 @@ export class DepositAggregator extends SmartContract {
             const hashData1 = DepositAggregator.hashDepositData(depositData1)
 
             assert(hashData0 == prevTx0.hashData)
-            assert(hashData1 == prevTx0.hashData)
+            assert(hashData1 == prevTx1.hashData)
         } else {
             // If we're higher up the aggregation tree, we need to check ancestor
             // transactions in order to inductively validate the whole tree.
