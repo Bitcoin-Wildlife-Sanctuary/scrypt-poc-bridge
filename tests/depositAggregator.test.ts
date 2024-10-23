@@ -11,9 +11,21 @@ use(chaiAsPromised)
 
 import { DepositAggregator, DepositData } from '../src/contracts/depositAggregator'
 import { Bridge } from '../src/contracts/bridge'
-import { hash256, PubKey, Sha256, toByteString, UTXO } from 'scrypt-ts';
+import { Addr, hash256, PubKey, Sha256, toByteString, UTXO } from 'scrypt-ts';
 import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, schnorrTrick } from './utils/txHelper';
 import { myAddress, myPrivateKey, myPublicKey } from './utils/privateKey';
+import { buildMerkleTree, MerkleTree } from './utils/merkleTree';
+import { MERKLE_PROOF_MAX_DEPTH } from '../src/contracts/merklePath';
+
+
+export function initDepositsTree(depositDataList: DepositData[]): MerkleTree {
+    const leaves = depositDataList.map(data => DepositAggregator.hashDepositData(data))
+
+    const tree = new MerkleTree();
+    buildMerkleTree(leaves, tree);
+
+    return tree
+}
 
 
 export function createLeafDepositTxns(
@@ -676,11 +688,21 @@ export async function performValidDepositAggregation(
         .feePerByte(2)
         .sign(myPrivateKey)
 
+    utxos.length = 0
+    utxos.push(
+        {
+            address: myAddress.toString(),
+            txId: txFunds.id,
+            outputIndex: txFunds.outputs.length - 1,
+            script: new btc.Script(myAddress),
+            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+        }
+    )
 
     /////////////////////////////////////////////////////////
     //////// Construct 4x leaf deposit transactions. ////////
     /////////////////////////////////////////////////////////
-    const myAddr = toByteString(myAddress.toBuffer().toString('hex')) as Sha256
+    const myAddr = toByteString(myAddress.toBuffer().toString('hex')) as Addr
     const depositDataList: DepositData[] = [
         {
             address: myAddr,
@@ -769,8 +791,13 @@ export async function performValidDepositAggregation(
         depositDataHashList[0], depositDataHashList[1], depositDataHashList[2], depositDataHashList[3],
         fundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
+    
+    const depositTree = initDepositsTree(depositDataList)
 
     return {
+        depositDataList,
+        depositDataHashList,
+        depositTree,
         txFunds,
         leafTxns,
         aggregateTx0,

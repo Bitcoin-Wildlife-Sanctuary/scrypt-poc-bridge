@@ -1,9 +1,9 @@
-import { SmartContractLib, method, ByteString, int2ByteString, toByteString, assert, prop, Sha256, len, OpCode } from "scrypt-ts"
+import { SmartContractLib, method, ByteString, int2ByteString, toByteString, assert, prop, Sha256, len, OpCode, Addr } from "scrypt-ts"
 
 export class GeneralUtils extends SmartContractLib {
     
     @prop()
-    static readonly NULL_ADDRESS: ByteString = toByteString('0000000000000000000000000000000000000000000000000000000000000000')
+    static readonly NULL_ADDRESS: Addr = Addr(toByteString('0000000000000000000000000000000000000000'))
 
     @method()
     static padAmt(amt: bigint): ByteString {

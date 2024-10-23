@@ -11,7 +11,7 @@ use(chaiAsPromised)
 
 import { AggregationData, WithdrawalAggregator, WithdrawalData } from '../src/contracts/withdrawalAggregator'
 import { Bridge } from '../src/contracts/bridge'
-import { hash256, PubKey, Sha256, toByteString } from 'scrypt-ts';
+import { Addr, hash256, PubKey, Sha256, toByteString } from 'scrypt-ts';
 import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, schnorrTrick } from './utils/txHelper';
 import { myAddress, myPrivateKey, myPublicKey } from './utils/privateKey';
 
@@ -59,7 +59,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         if (utxos.length === 0) {
             throw new Error(`No UTXO's for address: ${myAddress.toString()}`)
         }
-
+        
         const txFunds = new btc.Transaction()
             .from(utxos)
             .to(myAddress, 1500)
@@ -115,7 +115,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
             // Withdrawal information.
             const withdrawalAmount = 1500n
             const withdrwalData: WithdrawalData = {
-                address: toByteString(myAddress.hashBuffer.toString('hex')) as Sha256,
+                address: toByteString(myAddress.hashBuffer.toString('hex')) as Addr,
                 amount: withdrawalAmount
             }
 

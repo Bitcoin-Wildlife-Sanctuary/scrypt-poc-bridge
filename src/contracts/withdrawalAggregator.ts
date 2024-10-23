@@ -9,7 +9,8 @@ import {
     PubKey,
     prop,
     ByteString,
-    Sha256
+    Sha256,
+    Addr
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
@@ -18,7 +19,7 @@ import { GeneralUtils } from './generalUtils'
 
 // TODO: rename to WithdrawalRequest?
 export type WithdrawalData = {
-    address: Sha256
+    address: Addr
     amount: bigint
 }
 
