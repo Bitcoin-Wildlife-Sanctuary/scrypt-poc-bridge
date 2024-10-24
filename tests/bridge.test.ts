@@ -317,8 +317,10 @@ describe('Test SmartContract `Bridge`', () => {
             .sign(myPrivateKey)
 
         let schnorrTrickDataIn0 = await schnorrTrick(bridgeTx0, tapleafBridge, 0)
-        let sigOperatorIn0 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn0.sighash.hash);
+        let schnorrTrickDataIn1 = await schnorrTrick(bridgeTx0, tapleafDepositAggregator, 1)
 
+        let sigOperatorIn0 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn0.sighash.hash);
+        let sigOperatorIn1 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn1.sighash.hash);
 
         let prevTxVer = Buffer.alloc(4)
         prevTxVer.writeUInt32LE(deployTx.version)
@@ -335,7 +337,7 @@ describe('Test SmartContract `Bridge`', () => {
         let prevTxExpanderRoot = Buffer.from('', 'hex')
         let prevTxExpanderAmt = Buffer.from('', 'hex')
 
-        const aggregateTx = depositAggregationRes.aggregateTx2
+        let aggregateTx = depositAggregationRes.aggregateTx2
         let aggregatorTxVer = Buffer.alloc(4)
         aggregatorTxVer.writeUInt32LE(aggregateTx.version)
         let aggregatorTxLocktime = Buffer.alloc(4)
@@ -410,13 +412,107 @@ describe('Test SmartContract `Bridge`', () => {
         ]
 
         bridgeTx0.inputs[0].witnesses = witnessesIn0
+        
+        let ancestorTx0 = depositAggregationRes.aggregateTx0
+        let ancestorTx0Ver = Buffer.alloc(4)
+        ancestorTx0Ver.writeUInt32LE(ancestorTx0.version)
+        let ancestorTx0Locktime = Buffer.alloc(4)
+        ancestorTx0Locktime.writeUInt32LE(ancestorTx0.nLockTime)
+        let ancestorTx0InputContract0 = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputContract0);
+        let ancestorTx0InputContract1 = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[1].toBufferWriter(ancestorTx0InputContract1);
+        let ancestorTx0InputFee = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[2].toBufferWriter(ancestorTx0InputFee);
+        let ancestorTx0ContractAmt = Buffer.alloc(8)
+        ancestorTx0ContractAmt.writeUInt32LE(ancestorTx0.outputs[0].satoshis)
+        let ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptDepositAggregatorP2TR.toBuffer()])
+        let ancestorTx0HashData = Buffer.from(depositAggregationRes.depositTree.levels[1][0], 'hex')
+        
+        let ancestorTx1 = depositAggregationRes.aggregateTx1
+        let ancestorTx1Ver = Buffer.alloc(4)
+        ancestorTx1Ver.writeUInt32LE(ancestorTx1.version)
+        let ancestorTx1Locktime = Buffer.alloc(4)
+        ancestorTx1Locktime.writeUInt32LE(ancestorTx1.nLockTime)
+        let ancestorTx1InputContract0 = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputContract0);
+        let ancestorTx1InputContract1 = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[1].toBufferWriter(ancestorTx1InputContract1);
+        let ancestorTx1InputFee = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[2].toBufferWriter(ancestorTx1InputFee);
+        let ancestorTx1ContractAmt = Buffer.alloc(8)
+        ancestorTx1ContractAmt.writeUInt32LE(ancestorTx1.outputs[0].satoshis)
+        let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptDepositAggregatorP2TR.toBuffer()])
+        let ancestorTx1HashData = Buffer.from(depositAggregationRes.depositTree.levels[1][1], 'hex')
+        
+        let witnessesIn1 = [
+            schnorrTrickDataIn1.preimageParts.txVersion,
+            schnorrTrickDataIn1.preimageParts.nLockTime,
+            schnorrTrickDataIn1.preimageParts.hashPrevouts,
+            schnorrTrickDataIn1.preimageParts.hashSpentAmounts,
+            schnorrTrickDataIn1.preimageParts.hashScripts,
+            schnorrTrickDataIn1.preimageParts.hashSequences,
+            schnorrTrickDataIn1.preimageParts.hashOutputs,
+            schnorrTrickDataIn1.preimageParts.spendType,
+            schnorrTrickDataIn1.preimageParts.inputNumber,
+            schnorrTrickDataIn1.preimageParts.tapleafHash,
+            schnorrTrickDataIn1.preimageParts.keyVersion,
+            schnorrTrickDataIn1.preimageParts.codeseparatorPosition,
+            schnorrTrickDataIn1.sighash.hash,
+            schnorrTrickDataIn1._e,
+            Buffer.from([schnorrTrickDataIn1.eLastByte]),
 
-        console.log(witnessesIn0)
+            sigOperatorIn1,
+
+            aggregatorTxVer,
+            aggregatorTxInputContract0.toBuffer(),
+            aggregatorTxInputContract1.toBuffer(),
+            aggregatorTxInputFee.toBuffer(),
+            aggregatorTxContractAmt,
+            aggregatorTxContractSPK,
+            aggregatorTxHashData,
+            aggregatorTxLocktime,
+            
+            ancestorTx0Ver,
+            ancestorTx0InputContract0.toBuffer(),
+            ancestorTx0InputContract1.toBuffer(),
+            ancestorTx0InputFee.toBuffer(),
+            ancestorTx0ContractAmt,
+            ancestorTx0ContractSPK,
+            ancestorTx0HashData,
+            ancestorTx0Locktime,
+
+            ancestorTx1Ver,
+            ancestorTx1InputContract0.toBuffer(),
+            ancestorTx1InputContract1.toBuffer(),
+            ancestorTx1InputFee.toBuffer(),
+            ancestorTx1ContractAmt,
+            ancestorTx1ContractSPK,
+            ancestorTx1HashData,
+            ancestorTx1Locktime,
+            
+            deployTx._getHash(),
+
+            fundingPrevout.toBuffer(),
+
+            Buffer.from('01', 'hex'), // OP_1 - second public method chosen
+
+            scriptDepositAggregator.toBuffer(),
+            Buffer.from(cblockDepositAggregator, 'hex')
+        ]
+
+        bridgeTx0.inputs[1].witnesses = witnessesIn1
+
+        console.log(witnessesIn1)
+        
+        console.log(depositAggregationRes.aggregateTx0.id)
 
         // Run locally
         let interpreter = new btc.Script.Interpreter()
         let flags = btc.Script.Interpreter.SCRIPT_VERIFY_WITNESS | btc.Script.Interpreter.SCRIPT_VERIFY_TAPROOT | btc.Script.Interpreter.SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS
         let res = interpreter.verify(new btc.Script(''), deployTx.outputs[0].script, bridgeTx0, 0, flags, witnessesIn0, deployTx.outputs[0].satoshis)
+        expect(res).to.be.true
+        res = interpreter.verify(new btc.Script(''), depositAggregationRes.aggregateTx2.outputs[0].script, bridgeTx0, 1, flags, witnessesIn1, depositAggregationRes.aggregateTx2.outputs[0].satoshis)
         expect(res).to.be.true
 
     })
