@@ -1,5 +1,6 @@
-import { hash256, Sha256, toByteString } from 'scrypt-ts';
+import { ByteString, hash256, Sha256, toByteString } from 'scrypt-ts';
 import { MerkleProof, Node, NodePos, MERKLE_PROOF_MAX_DEPTH } from '../../src/contracts/merklePath';
+import { GeneralUtils } from '../../src/contracts/generalUtils';
 
 export class MerkleTree {
     levels: Sha256[][];
@@ -58,20 +59,18 @@ export class MerkleTree {
 
         return proof as MerkleProof;
     }
-    
-    
-    // Update a leaf and recalculate the tree
-    updateLeaf(leafIndex: number, newValue: Sha256) {
-        const numLevels = this.levels.length;
-        this.levels[0][leafIndex] = newValue; // Update the leaf with the new hash
 
-        // Recalculate the tree from the updated leaf upwards
+
+    // Update a leaf and recalculate the tree
+    updateLeaf(leafIndex: number, newValue: Sha256, intermediateValues?: ByteString[][]) {
+        const numLevels = this.levels.length;
+        this.levels[0][leafIndex] = newValue;
+
         let index = leafIndex;
         for (let level = 0; level < numLevels - 1; level++) {
             const currentLevel = this.levels[level];
             const nextLevel = this.levels[level + 1];
 
-            // Determine sibling index and compute the new hash for the parent node
             const isRightNode = index % 2 === 1;
             const siblingIndex = isRightNode ? index - 1 : index + 1;
 
@@ -79,29 +78,49 @@ export class MerkleTree {
             const right = isRightNode ? currentLevel[index] : currentLevel[siblingIndex];
 
             const parentIndex = Math.floor(index / 2);
-            nextLevel[parentIndex] = hash256(left + right);
 
-            // Move to the next level up
+            // Retrieve the unique intermediate value for this specific node if it exists
+            const intermediateValue = intermediateValues && intermediateValues[level]
+                ? intermediateValues[level][parentIndex]
+                : undefined;
+
+            // Compute the parent hash, including the node-specific intermediate value if provided
+            nextLevel[parentIndex] = intermediateValue
+                ? hash256(left + right + intermediateValue)
+                : hash256(left + right);
+
             index = parentIndex;
         }
     }
 }
 
-export function buildMerkleTree(leaves: Sha256[], tree: MerkleTree): Sha256[] {
+export function buildMerkleTree(leaves: Sha256[], tree: MerkleTree, intermediateValues?: ByteString[][]): Sha256[] {
     tree.addLevel(leaves);
 
     if (leaves.length === 1) {
         return leaves;
+    } else if (leaves.length % 2 == 1) {
+        throw new Error('Uneven leaf number not yet supported.')
     }
 
     const nextLevel: Sha256[] = [];
 
     for (let i = 0; i < leaves.length; i += 2) {
         const left = leaves[i];
-        const right = i + 1 < leaves.length ? leaves[i + 1] : leaves[i];
-        const combinedHash = hash256(left + right);
+        const right = leaves[i + 1];
+
+        const parentIndex = Math.floor(i / 2);
+        // Retrieve the node-specific intermediate value if it exists
+        const intermediateValue = intermediateValues && intermediateValues[tree.levels.length - 1]
+            ? intermediateValues[tree.levels.length - 1][parentIndex]
+            : undefined;
+
+        // Compute the combined hash, including the node-specific intermediate value if provided
+        const combinedHash = intermediateValue
+            ? hash256(left + right + intermediateValue)
+            : hash256(left + right);
         nextLevel.push(combinedHash);
     }
 
-    return buildMerkleTree(nextLevel, tree);
+    return buildMerkleTree(nextLevel, tree, intermediateValues);
 }

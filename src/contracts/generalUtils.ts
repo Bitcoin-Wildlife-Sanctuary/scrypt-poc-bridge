@@ -8,7 +8,9 @@ export class GeneralUtils extends SmartContractLib {
     @method()
     static padAmt(amt: bigint): ByteString {
         let res = int2ByteString(amt)
-        if (amt < 0x0100n) {
+        if (res == toByteString('')) {
+            res = toByteString('0000000000000000')
+        } else if (amt < 0x0100n) {
             res += toByteString('00000000000000')
         } else if (amt < 0x010000n) {
             res += toByteString('000000000000')

@@ -702,7 +702,7 @@ export async function performValidDepositAggregation(
     /////////////////////////////////////////////////////////
     //////// Construct 4x leaf deposit transactions. ////////
     /////////////////////////////////////////////////////////
-    const myAddr = toByteString(myAddress.toBuffer().toString('hex')) as Addr
+    const myAddr = toByteString(myAddress.hashBuffer.toString('hex')) as Addr
     const depositDataList: DepositData[] = [
         {
             address: myAddr,
@@ -791,7 +791,7 @@ export async function performValidDepositAggregation(
         depositDataHashList[0], depositDataHashList[1], depositDataHashList[2], depositDataHashList[3],
         fundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
-    
+
     const depositTree = initDepositsTree(depositDataList)
 
     return {
