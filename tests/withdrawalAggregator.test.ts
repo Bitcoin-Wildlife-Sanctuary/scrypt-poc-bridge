@@ -27,7 +27,7 @@ export function getIntermediateSums(withdrawalDataList: WithdrawalData[]): ByteS
     const padding = new Array(nLeaves - prevAmts.length).fill(0n);
     prevAmts = prevAmts.concat(padding)
 
-    for (let level = 0; level < MERKLE_PROOF_MAX_DEPTH - 1; level++) {
+    for (let level = 0; level < MERKLE_PROOF_MAX_DEPTH; level++) {
         res.push([])
 
         const newAmts: bigint[] = []

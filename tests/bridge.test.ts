@@ -12,14 +12,15 @@ use(chaiAsPromised)
 import { WithdrawalExpander } from '../src/contracts/withdrawalExpander'
 import { DepositAggregator, DepositData } from '../src/contracts/depositAggregator'
 import { AccountData, Bridge, MAX_NODES_AGGREGATED } from '../src/contracts/bridge'
-import { hash256, PubKey, Sha256, toByteString, UTXO } from 'scrypt-ts';
+import { ByteString, hash256, PubKey, Sha256, toByteString, UTXO } from 'scrypt-ts';
 import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, schnorrTrick } from './utils/txHelper';
 import { myAddress, myPrivateKey, myPublicKey } from './utils/privateKey';
-import { WithdrawalAggregator } from '../src/contracts/withdrawalAggregator';
+import { WithdrawalAggregator, WithdrawalData } from '../src/contracts/withdrawalAggregator';
 import { performValidDepositAggregation } from './depositAggregator.test';
 import { MERKLE_PROOF_MAX_DEPTH, MerklePath, MerkleProof, NodePos } from '../src/contracts/merklePath';
 import { GeneralUtils } from '../src/contracts/generalUtils';
 import { buildMerkleTree, MerkleTree } from './utils/merkleTree';
+import { performValidWithdrawalAggregation } from './withdrawalAggregator.test';
 
 
 export function initAccountsTree(accountsData: AccountData[]): MerkleTree {
@@ -51,6 +52,48 @@ function prepareDepositsWitnessArray(deposits: DepositData[]): Buffer[] {
     while (res.length < MAX_NODES_AGGREGATED * 2) {
         res.push(Buffer.from('', 'hex'))
         res.push(Buffer.from('', 'hex'))
+    }
+
+    return res
+}
+
+function prepareWithdrawalsWitnessArray(withdrawals: WithdrawalData[]): Buffer[] {
+    const res: Buffer[] = []
+
+    for (const withdrawal of withdrawals) {
+        let withdrawalAddressBuff = Buffer.from(withdrawal.address, 'hex')
+        let withdrawalAmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalAmtBuff.writeInt16LE(Number(withdrawal.amount))
+
+        res.push(withdrawalAddressBuff)
+        res.push(withdrawalAmtBuff)
+    }
+
+    // Pad with empty buffers.
+    while (res.length < MAX_NODES_AGGREGATED * 2) {
+        res.push(Buffer.from('', 'hex'))
+        res.push(Buffer.from('', 'hex'))
+    }
+
+    return res
+}
+
+function prepareIntermediateSumsArray(
+    intermediateSums: ByteString[][],
+    leafIndexes: number[]
+): Buffer[] {
+    let res: Buffer[] = []
+
+    for (let index of leafIndexes) {
+        for (let level = 0; level < MERKLE_PROOF_MAX_DEPTH; level++) {
+            const parentIndex = Math.floor(index / 2);
+            
+            res.push(
+                Buffer.from(intermediateSums[level][parentIndex], 'hex')
+            )
+            
+            index = parentIndex
+        }
     }
 
     return res
@@ -138,7 +181,7 @@ describe('Test SmartContract `Bridge`', () => {
         // Create Bridge instance.
         const bridge = new Bridge(
             PubKey(toByteString(pubkeyOperator.toString())),
-            toByteString(scriptExpanderP2TR.toBuffer().toString('hex'))
+            toByteString('22' + scriptExpanderP2TR.toBuffer().toString('hex'))
         )
 
         const scriptBridge = bridge.lockingScript
@@ -181,10 +224,17 @@ describe('Test SmartContract `Bridge`', () => {
         const depositAmounts = [1329n, 1400n, 1500n, 1888n]
         const depositTxFee = 3000
 
-
         const depositAggregationRes = await performValidDepositAggregation(
             utxos, depositAmounts, depositTxFee, scriptDepositAggregatorP2TR, cblockDepositAggregator,
             scriptDepositAggregator, tapleafDepositAggregator, seckeyOperator
+        )
+
+        const withdrawalAmounts = [1000n, 800n, 700n, 998n]
+        const withdrawalTxFee = 3000
+
+        const withdrawalAggregationRes = await performValidWithdrawalAggregation(
+            utxos, withdrawalAmounts, withdrawalTxFee, scriptWithdrawalAggregatorP2TR, cblockWithdrawalAggregator,
+            scriptWithdrawalAggregator, tapleafWithdrawalAggregator, seckeyOperator
         )
 
         // Create ampty accounts tree.
@@ -204,6 +254,7 @@ describe('Test SmartContract `Bridge`', () => {
             .from(
                 utxos
             )
+            .to(myAddress, 3000)
             .to(myAddress, 3000)
             .to(myAddress, 3000)
             .change(myAddress)
@@ -412,7 +463,7 @@ describe('Test SmartContract `Bridge`', () => {
         ]
 
         bridgeTx0.inputs[0].witnesses = witnessesIn0
-        
+
         let ancestorTx0 = depositAggregationRes.aggregateTx0
         let ancestorTx0Ver = Buffer.alloc(4)
         ancestorTx0Ver.writeUInt32LE(ancestorTx0.version)
@@ -428,7 +479,7 @@ describe('Test SmartContract `Bridge`', () => {
         ancestorTx0ContractAmt.writeUInt32LE(ancestorTx0.outputs[0].satoshis)
         let ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptDepositAggregatorP2TR.toBuffer()])
         let ancestorTx0HashData = Buffer.from(depositAggregationRes.depositTree.levels[1][0], 'hex')
-        
+
         let ancestorTx1 = depositAggregationRes.aggregateTx1
         let ancestorTx1Ver = Buffer.alloc(4)
         ancestorTx1Ver.writeUInt32LE(ancestorTx1.version)
@@ -444,7 +495,7 @@ describe('Test SmartContract `Bridge`', () => {
         ancestorTx1ContractAmt.writeUInt32LE(ancestorTx1.outputs[0].satoshis)
         let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptDepositAggregatorP2TR.toBuffer()])
         let ancestorTx1HashData = Buffer.from(depositAggregationRes.depositTree.levels[1][1], 'hex')
-        
+
         let witnessesIn1 = [
             schnorrTrickDataIn1.preimageParts.txVersion,
             schnorrTrickDataIn1.preimageParts.nLockTime,
@@ -472,7 +523,7 @@ describe('Test SmartContract `Bridge`', () => {
             aggregatorTxContractSPK,
             aggregatorTxHashData,
             aggregatorTxLocktime,
-            
+
             ancestorTx0Ver,
             ancestorTx0InputContract0.toBuffer(),
             ancestorTx0InputContract1.toBuffer(),
@@ -490,7 +541,7 @@ describe('Test SmartContract `Bridge`', () => {
             ancestorTx1ContractSPK,
             ancestorTx1HashData,
             ancestorTx1Locktime,
-            
+
             deployTx._getHash(),
 
             fundingPrevout.toBuffer(),
@@ -503,10 +554,6 @@ describe('Test SmartContract `Bridge`', () => {
 
         bridgeTx0.inputs[1].witnesses = witnessesIn1
 
-        console.log(witnessesIn1)
-        
-        console.log(depositAggregationRes.aggregateTx0.id)
-
         // Run locally
         let interpreter = new btc.Script.Interpreter()
         let flags = btc.Script.Interpreter.SCRIPT_VERIFY_WITNESS | btc.Script.Interpreter.SCRIPT_VERIFY_TAPROOT | btc.Script.Interpreter.SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS
@@ -515,6 +562,291 @@ describe('Test SmartContract `Bridge`', () => {
         res = interpreter.verify(new btc.Script(''), depositAggregationRes.aggregateTx2.outputs[0].script, bridgeTx0, 1, flags, witnessesIn1, depositAggregationRes.aggregateTx2.outputs[0].satoshis)
         expect(res).to.be.true
 
+
+        ////////////////////////////////////
+        // Withdrawal aggregation result. //
+        ////////////////////////////////////
+        bridgeUTXO = {
+            txId: bridgeTx0.id,
+            outputIndex: 0,
+            script: scriptBridgeP2TR,
+            satoshis: bridgeTx0.outputs[0].satoshis
+        }
+        let withdrawalAggregationUTXO = {
+            txId: withdrawalAggregationRes.aggregateTx2.id,
+            outputIndex: 0,
+            script: scriptWithdrawalAggregatorP2TR,
+            satoshis: withdrawalAggregationRes.aggregateTx2.outputs[0].satoshis
+        }
+
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 2,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[2].satoshis
+        }
+
+        // Update accounts root with all withdrawals.
+        // Also get all releavant proofs.
+        accountsCurrent = Array.from(accounts)
+        accountsSlected = []
+        prevAccountsRoot = accountsTree.getRoot()
+        let withdrawals: WithdrawalData[] = []
+        let withdrawalProofs: MerkleProof[] = []
+        accountProofs = []
+        let totalAmtWithdrawn = 0n
+        for (let i = 0; i < 4; i++) {
+            accountsSlected.push(accountsCurrent[i])
+
+            const withdrawal = withdrawalAggregationRes.withdrawalDataList[i]
+            withdrawals.push(withdrawal)
+
+            const withdrawalProof = withdrawalAggregationRes.withdrawalTree.getMerkleProof(i)
+            withdrawalProofs.push(withdrawalProof)
+
+            const accountProof = accountsTree.getMerkleProof(i)
+            accountProofs.push(accountProof)
+
+            accounts[i] = {
+                address: accounts[i].address,
+                balance: accounts[i].balance - withdrawal.amount
+            }
+
+            accountsTree.updateLeaf(i, Bridge.hashAccountData(accounts[i]))
+
+            totalAmtWithdrawn += withdrawal.amount
+        }
+
+        stateHash = Bridge.getStateHash(
+            accountsTree.getRoot(),
+            toByteString('22' + scriptDepositAggregatorP2TR.toHex()),
+            toByteString('22' + scriptWithdrawalAggregatorP2TR.toHex()),
+            toByteString(withdrawalAggregationRes.withdrawalTree.getRoot())
+        )
+        opRetScript = new btc.Script(`6a20${stateHash}`)
+
+        const bridgeTx1 = new btc.Transaction()
+            .from(
+                [
+                    bridgeUTXO,
+                    withdrawalAggregationUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: bridgeUTXO.satoshis - Number(totalAmtWithdrawn),
+                script: scriptBridgeP2TR
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: 0,
+                script: opRetScript
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: Number(totalAmtWithdrawn),
+                script: scriptExpanderP2TR
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickDataIn0 = await schnorrTrick(bridgeTx1, tapleafBridge, 0)
+        schnorrTrickDataIn1 = await schnorrTrick(bridgeTx1, tapleafWithdrawalAggregator, 1)
+
+        sigOperatorIn0 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn0.sighash.hash);
+        sigOperatorIn1 = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickDataIn1.sighash.hash);
+
+        prevTxVer = Buffer.alloc(4)
+        prevTxVer.writeUInt32LE(bridgeTx0.version)
+        prevTxLocktime = Buffer.alloc(4)
+        prevTxLocktime.writeUInt32LE(bridgeTx0.nLockTime)
+        prevTxInputs = new btc.encoding.BufferWriter()
+        prevTxInputs.writeUInt8(bridgeTx0.inputs.length)
+        bridgeTx0.inputs[0].toBufferWriter(prevTxInputs);
+        bridgeTx0.inputs[1].toBufferWriter(prevTxInputs);
+        bridgeTx0.inputs[2].toBufferWriter(prevTxInputs);
+        prevTxContractAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxContractAmt.writeInt16LE(bridgeTx0.outputs[0].satoshis)
+        prevTxContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptBridgeP2TR.toBuffer()])
+        prevTxExpanderSPK = Buffer.from('', 'hex')
+        prevTxAccountsRoot = Buffer.from(prevAccountsRoot, 'hex')
+        prevTxExpanderRoot = Buffer.from('', 'hex')
+        prevTxExpanderAmt = Buffer.from('', 'hex')
+
+        aggregateTx = withdrawalAggregationRes.aggregateTx2
+        aggregatorTxVer = Buffer.alloc(4)
+        aggregatorTxVer.writeUInt32LE(aggregateTx.version)
+        aggregatorTxLocktime = Buffer.alloc(4)
+        aggregatorTxLocktime.writeUInt32LE(aggregateTx.nLockTime)
+        aggregatorTxInputContract0 = new btc.encoding.BufferWriter()
+        aggregateTx.inputs[0].toBufferWriter(aggregatorTxInputContract0);
+        aggregatorTxInputContract1 = new btc.encoding.BufferWriter()
+        aggregateTx.inputs[1].toBufferWriter(aggregatorTxInputContract1);
+        aggregatorTxInputFee = new btc.encoding.BufferWriter()
+        aggregateTx.inputs[2].toBufferWriter(aggregatorTxInputFee);
+        aggregatorTxContractAmt = Buffer.alloc(8)
+        aggregatorTxContractAmt.writeUInt32LE(aggregateTx.outputs[0].satoshis)
+        aggregatorTxContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptWithdrawalAggregatorP2TR.toBuffer()])
+        aggregatorTxHashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.getRoot(), 'hex')
+
+        fundingPrevout = new btc.encoding.BufferWriter()
+        fundingPrevout.writeReverse(bridgeTx1.inputs[2].prevTxId);
+        fundingPrevout.writeInt32LE(bridgeTx1.inputs[2].outputIndex);
+
+        witnessesIn0 = [
+            schnorrTrickDataIn0.preimageParts.txVersion,
+            schnorrTrickDataIn0.preimageParts.nLockTime,
+            schnorrTrickDataIn0.preimageParts.hashPrevouts,
+            schnorrTrickDataIn0.preimageParts.hashSpentAmounts,
+            schnorrTrickDataIn0.preimageParts.hashScripts,
+            schnorrTrickDataIn0.preimageParts.hashSequences,
+            schnorrTrickDataIn0.preimageParts.hashOutputs,
+            schnorrTrickDataIn0.preimageParts.spendType,
+            schnorrTrickDataIn0.preimageParts.inputNumber,
+            schnorrTrickDataIn0.preimageParts.tapleafHash,
+            schnorrTrickDataIn0.preimageParts.keyVersion,
+            schnorrTrickDataIn0.preimageParts.codeseparatorPosition,
+            schnorrTrickDataIn0.sighash.hash,
+            schnorrTrickDataIn0._e,
+            Buffer.from([schnorrTrickDataIn0.eLastByte]),
+
+            sigOperatorIn0,
+
+            prevTxVer,
+            prevTxInputs.toBuffer(),
+            prevTxContractSPK,
+            prevTxExpanderSPK,
+            prevTxContractAmt,
+            prevTxAccountsRoot,
+            prevTxExpanderRoot,
+            prevTxExpanderAmt,
+            Buffer.concat([Buffer.from('22', 'hex'), scriptDepositAggregatorP2TR.toBuffer()]),
+            Buffer.concat([Buffer.from('22', 'hex'), scriptWithdrawalAggregatorP2TR.toBuffer()]),
+            prevTxLocktime,
+
+            aggregatorTxVer,
+            aggregatorTxInputContract0.toBuffer(),
+            aggregatorTxInputContract1.toBuffer(),
+            aggregatorTxInputFee.toBuffer(),
+            aggregatorTxContractAmt,
+            aggregatorTxContractSPK,
+            aggregatorTxHashData,
+            aggregatorTxLocktime,
+
+            fundingPrevout.toBuffer(),
+
+            ...prepareWithdrawalsWitnessArray(withdrawals),
+            ...prepareAccountsWitnessArray(accountsSlected),
+
+            ...prepareIntermediateSumsArray(
+                withdrawalAggregationRes.intermediateSums,
+                [0, 1, 2, 3]
+            ),
+
+            ...prepareMerkleProofsWitnessArray(withdrawalProofs),
+            ...prepareMerkleProofsWitnessArray(accountProofs),
+
+            Buffer.from('01', 'hex'), // OP_1 - second public method chosen
+
+            scriptBridge.toBuffer(),
+            Buffer.from(cblockBridge, 'hex')
+        ]
+
+        bridgeTx1.inputs[0].witnesses = witnessesIn0
+
+        ancestorTx0 = withdrawalAggregationRes.aggregateTx0
+        ancestorTx0Ver = Buffer.alloc(4)
+        ancestorTx0Ver.writeUInt32LE(ancestorTx0.version)
+        ancestorTx0Locktime = Buffer.alloc(4)
+        ancestorTx0Locktime.writeUInt32LE(ancestorTx0.nLockTime)
+        ancestorTx0InputContract0 = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputContract0);
+        ancestorTx0InputContract1 = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[1].toBufferWriter(ancestorTx0InputContract1);
+        ancestorTx0InputFee = new btc.encoding.BufferWriter()
+        ancestorTx0.inputs[2].toBufferWriter(ancestorTx0InputFee);
+        ancestorTx0ContractAmt = Buffer.alloc(8)
+        ancestorTx0ContractAmt.writeUInt32LE(ancestorTx0.outputs[0].satoshis)
+        ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptWithdrawalAggregatorP2TR.toBuffer()])
+        ancestorTx0HashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][0], 'hex')
+
+        ancestorTx1 = withdrawalAggregationRes.aggregateTx1
+        ancestorTx1Ver = Buffer.alloc(4)
+        ancestorTx1Ver.writeUInt32LE(ancestorTx1.version)
+        ancestorTx1Locktime = Buffer.alloc(4)
+        ancestorTx1Locktime.writeUInt32LE(ancestorTx1.nLockTime)
+        ancestorTx1InputContract0 = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputContract0);
+        ancestorTx1InputContract1 = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[1].toBufferWriter(ancestorTx1InputContract1);
+        ancestorTx1InputFee = new btc.encoding.BufferWriter()
+        ancestorTx1.inputs[2].toBufferWriter(ancestorTx1InputFee);
+        ancestorTx1ContractAmt = Buffer.alloc(8)
+        ancestorTx1ContractAmt.writeUInt32LE(ancestorTx1.outputs[0].satoshis)
+        ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptWithdrawalAggregatorP2TR.toBuffer()])
+        ancestorTx1HashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][1], 'hex')
+
+        witnessesIn1 = [
+            schnorrTrickDataIn1.preimageParts.txVersion,
+            schnorrTrickDataIn1.preimageParts.nLockTime,
+            schnorrTrickDataIn1.preimageParts.hashPrevouts,
+            schnorrTrickDataIn1.preimageParts.hashSpentAmounts,
+            schnorrTrickDataIn1.preimageParts.hashScripts,
+            schnorrTrickDataIn1.preimageParts.hashSequences,
+            schnorrTrickDataIn1.preimageParts.hashOutputs,
+            schnorrTrickDataIn1.preimageParts.spendType,
+            schnorrTrickDataIn1.preimageParts.inputNumber,
+            schnorrTrickDataIn1.preimageParts.tapleafHash,
+            schnorrTrickDataIn1.preimageParts.keyVersion,
+            schnorrTrickDataIn1.preimageParts.codeseparatorPosition,
+            schnorrTrickDataIn1.sighash.hash,
+            schnorrTrickDataIn1._e,
+            Buffer.from([schnorrTrickDataIn1.eLastByte]),
+
+            sigOperatorIn1,
+
+            aggregatorTxVer,
+            aggregatorTxInputContract0.toBuffer(),
+            aggregatorTxInputContract1.toBuffer(),
+            aggregatorTxInputFee.toBuffer(),
+            aggregatorTxContractAmt,
+            aggregatorTxContractSPK,
+            aggregatorTxHashData,
+            aggregatorTxLocktime,
+
+            ancestorTx0Ver,
+            ancestorTx0InputContract0.toBuffer(),
+            ancestorTx0InputContract1.toBuffer(),
+            ancestorTx0InputFee.toBuffer(),
+            ancestorTx0ContractAmt,
+            ancestorTx0ContractSPK,
+            ancestorTx0HashData,
+            ancestorTx0Locktime,
+
+            ancestorTx1Ver,
+            ancestorTx1InputContract0.toBuffer(),
+            ancestorTx1InputContract1.toBuffer(),
+            ancestorTx1InputFee.toBuffer(),
+            ancestorTx1ContractAmt,
+            ancestorTx1ContractSPK,
+            ancestorTx1HashData,
+            ancestorTx1Locktime,
+
+            bridgeTx0._getHash(),
+
+            fundingPrevout.toBuffer(),
+
+            Buffer.from('01', 'hex'), // OP_1 - second public method chosen
+
+            scriptWithdrawalAggregator.toBuffer(),
+            Buffer.from(cblockWithdrawalAggregator, 'hex')
+        ]
+
+        bridgeTx1.inputs[1].witnesses = witnessesIn1
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), bridgeTx0.outputs[0].script, bridgeTx1, 0, flags, witnessesIn0, bridgeTx0.outputs[0].satoshis)
+        expect(res).to.be.true
+        res = interpreter.verify(new btc.Script(''), withdrawalAggregationRes.aggregateTx2.outputs[0].script, bridgeTx1, 1, flags, witnessesIn1, withdrawalAggregationRes.aggregateTx2.outputs[0].satoshis)
+        expect(res).to.be.true
     })
 
 })

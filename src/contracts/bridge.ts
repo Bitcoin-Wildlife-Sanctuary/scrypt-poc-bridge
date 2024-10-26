@@ -12,6 +12,7 @@ import {
     Sha256,
     FixedArray,
     Addr,
+    int2ByteString,
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
@@ -168,7 +169,7 @@ export class Bridge extends SmartContract {
         sigOperator: Sig,
         prevTx: BridgeTransaction,           // Previous bridge update transaction.
         aggregatorTx: AggregatorTransaction, // Root aggregator transaction.
-        feePrevout: ByteString,
+        fundingPrevout: ByteString,
 
         withdrawals: FixedArray<WithdrawalData, typeof MAX_NODES_AGGREGATED>,
         accounts: FixedArray<AccountData, typeof MAX_NODES_AGGREGATED>,
@@ -200,7 +201,7 @@ export class Bridge extends SmartContract {
         const hashPrevouts = Bridge.getHashPrevouts(
             prevTxId,
             aggregatorTxId,
-            feePrevout
+            fundingPrevout
         )
         assert(hashPrevouts == shPreimage.hashPrevouts)
 
@@ -239,7 +240,7 @@ export class Bridge extends SmartContract {
                 withdrawal3, withdrawalProof3, intermediateSumsArr[3], aggregatorTx.hashData, accounts[3], accountProof3, accountsRootNew
             )
         }
-
+        
         // Sum up all deposit withdrawn.
         let totalAmtWithdrawn = 0n
         for (let i = 0; i < MAX_NODES_AGGREGATED; i++) {
