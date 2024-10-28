@@ -664,7 +664,7 @@ export async function mergeAggregateDepositNodes(
     return aggregateTx
 }
 
-export async function performValidDepositAggregation(
+export async function performDepositAggregation(
     utxos: UTXO[],
     depositAmounts: bigint[],
     txFee: number,
@@ -854,7 +854,7 @@ describe('Test SmartContract `DepositAggregator`', () => {
         const txFee = 3000
 
 
-        const aggregationRes = await performValidDepositAggregation(
+        const aggregationRes = await performDepositAggregation(
             utxos, depositAmounts, txFee, scriptAggregatorP2TR, cblockAggregator,
             scriptAggregator, tapleafAggregator, seckeyOperator
         )

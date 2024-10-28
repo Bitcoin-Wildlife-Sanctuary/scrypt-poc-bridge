@@ -826,7 +826,7 @@ export async function mergeAggregateWithdrawalNodes(
     return aggregateTx2
 }
 
-export async function performValidWithdrawalAggregation(
+export async function performWithdrawalAggregation(
     utxos: UTXO[],
     withdrawalAmounts: bigint[],
     txFee: number,
@@ -1035,7 +1035,7 @@ describe('Test SmartContract `WithdrawalAggregator`', () => {
         const withdrawalAmounts = [1000n, 800n, 700n, 998n]
         const txFee = 3000
 
-        const aggregationRes = await performValidWithdrawalAggregation(
+        const aggregationRes = await performWithdrawalAggregation(
             utxos, withdrawalAmounts, txFee, scriptAggregatorP2TR, cblockAggregator,
             scriptAggregator, tapleafAggregator, seckeyOperator
         )
