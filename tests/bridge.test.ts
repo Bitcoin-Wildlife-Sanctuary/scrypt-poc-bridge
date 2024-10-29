@@ -500,12 +500,14 @@ export async function performBridgeWithdrawal(
 
         totalAmtWithdrawn += withdrawal.amount
     }
+    
+    let expanderRoot = withdrawalAggregationRes.withdrawalTree.getRoot()
 
     let stateHash = Bridge.getStateHash(
         accountsTree.getRoot(),
         toByteString('22' + scriptDepositAggregatorP2TR.toHex()),
         toByteString('22' + scriptWithdrawalAggregatorP2TR.toHex()),
-        toByteString(withdrawalAggregationRes.withdrawalTree.getRoot())
+        toByteString(expanderRoot)
     )
     let opRetScript = new btc.Script(`6a20${stateHash}`)
 
@@ -726,7 +728,10 @@ export async function performBridgeWithdrawal(
     return {
         bridgeTx,
         accounts,
-        accountProofs
+        accountsTree,
+        accountProofs,
+        expanderRoot,
+        expanderAmt: totalAmtWithdrawn,
     }
 }
 

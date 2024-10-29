@@ -231,4 +231,15 @@ export async function schnorrTrick(
     }
 }
 
+export function hexLEtoDecimal(hexLE: string): number {
+  const bytes = hexLE.match(/.{2}/g);
+
+  if (!bytes) {
+    throw new Error("Invalid hexadecimal format.");
+  }
+
+  const hexBE = bytes.reverse().join("");
+  return parseInt(hexBE, 16);
+}
+
 

@@ -9,7 +9,7 @@ export type ExpanderTransaction = {
     ver: ByteString
     inputContract: ByteString
     inputFee: ByteString
-    expanderSPK: ByteString
+    contractSPK: ByteString
     output0Amt: bigint
     output1Amt: bigint
     hashData: Sha256
@@ -86,7 +86,8 @@ export class WithdrawalExpander extends SmartContract {
         // Check passed prev tx is actually unlocked by the currently executing tx.
         const hashPrevouts = WithdrawalExpander.getHashPrevouts(
             prevTxId,
-            fundingPrevout
+            fundingPrevout,
+            isPrevTxBridge
         )
         assert(hashPrevouts == shPreimage.hashPrevouts)
 
@@ -134,8 +135,12 @@ export class WithdrawalExpander extends SmartContract {
             // Bring in current aggregation data and check
             // that it matches the hash from the prev aggregation data.
             // Hash is chosen depending on isExpandingPrevTxFirstOutput.
+            // If prev tx is the bridge, we only copy the root hash 
+            // to be used in the next iteration.
             const hashCurrentAggregationData = WithdrawalAggregator.hashAggregationData(currentAggregationData)
-            if (isExpandingPrevTxFirstOutput) {
+            if (isPrevTxBridge) {
+                assert(hashCurrentAggregationData == prevTxBridge.expanderRoot)
+            } else if (isExpandingPrevTxFirstOutput) {
                 assert(hashCurrentAggregationData == prevAggregationData.prevH0)
             } else {
                 assert(hashCurrentAggregationData == prevAggregationData.prevH1)
@@ -150,7 +155,7 @@ export class WithdrawalExpander extends SmartContract {
             assert(hashNextAggregationData0 == currentAggregationData.prevH0)
             assert(hashNextAggregationData1 == currentAggregationData.prevH1)
 
-            let expanderSPK = prevTxExpander.expanderSPK
+            let expanderSPK = prevTxExpander.contractSPK
             if (isPrevTxBridge) {
                 expanderSPK = prevTxBridge.expanderSPK
             }
@@ -176,8 +181,8 @@ export class WithdrawalExpander extends SmartContract {
             tx.inputContract +
             tx.inputFee +
             toByteString('03') +
-            GeneralUtils.getContractOutput(tx.output0Amt, tx.expanderSPK) +
-            GeneralUtils.getContractOutput(tx.output1Amt, tx.expanderSPK) +
+            GeneralUtils.getContractOutput(tx.output0Amt, tx.contractSPK) +
+            GeneralUtils.getContractOutput(tx.output1Amt, tx.contractSPK) +
             GeneralUtils.getStateOutput(tx.hashData) +
             tx.locktime
         )
@@ -202,11 +207,13 @@ export class WithdrawalExpander extends SmartContract {
     @method()
     static getHashPrevouts(
         txId: Sha256,
-        feePrevout: ByteString
+        feePrevout: ByteString,
+        isPrevTxBridge: boolean
     ): Sha256 {
+        const contractOutIdx = isPrevTxBridge ? toByteString('02000000') : toByteString('00000000')
         return sha256(
             txId +
-            toByteString('00000000') +
+            contractOutIdx +
             feePrevout
         )
     }
