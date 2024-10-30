@@ -17,12 +17,16 @@ import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
 import { GeneralUtils } from './generalUtils'
 
 
-// TODO: rename to WithdrawalRequest?
+// TODO: Rename to WithdrawalRequest?
 export type WithdrawalData = {
     address: Addr
     amount: bigint
 }
 
+// TODO: It would probably be more efficient to store
+//       both the summands instead of the sum.
+//       This way there would be no need to bring in next
+//       nodes in the expansion process.
 export type AggregationData = {
     prevH0: Sha256,
     prevH1: Sha256,

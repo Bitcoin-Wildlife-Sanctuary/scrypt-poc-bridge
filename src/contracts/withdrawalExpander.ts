@@ -45,6 +45,7 @@ export class WithdrawalExpander extends SmartContract {
      * @param isExpandingLeaves - Indicates wether we're exapnding into leaves.
      * @param withdrawalData0 - Withdrawal data of fist leaf. Ignored if not expanding into leaves.
      * @param withdrawalData1 - Withdrawal data of second leaf. Ignored if not expanding into leaves.
+     * @param isLastAggregationLevel - Indicates wether we're on the last level of the aggregation tree (one above leaves).
      * @param fundingPrevout - The prevout for the funding UTXO.
      */
     @method()
@@ -65,6 +66,8 @@ export class WithdrawalExpander extends SmartContract {
         isExpandingLeaves: boolean,
         withdrawalData0: WithdrawalData,
         withdrawalData1: WithdrawalData,
+
+        isLastAggregationLevel: boolean,
 
         fundingPrevout: ByteString
     ) {
@@ -87,7 +90,8 @@ export class WithdrawalExpander extends SmartContract {
         const hashPrevouts = WithdrawalExpander.getHashPrevouts(
             prevTxId,
             fundingPrevout,
-            isPrevTxBridge
+            isPrevTxBridge,
+            isExpandingPrevTxFirstOutput
         )
         assert(hashPrevouts == shPreimage.hashPrevouts)
 
@@ -145,15 +149,27 @@ export class WithdrawalExpander extends SmartContract {
             } else {
                 assert(hashCurrentAggregationData == prevAggregationData.prevH1)
             }
-
-            // Bring in 2x next aggregation data for both branches.
+            // Bring in 2x next aggregation data (or actual withdrawal data) for both branches.
             // Check that they both hash to the hashes in current aggregation data.
             // Extract amounts from these two and enforce two new expander outputs
             // and a state with the hash of the current aggregation data.
-            const hashNextAggregationData0 = WithdrawalAggregator.hashAggregationData(nextAggregationData0)
-            const hashNextAggregationData1 = WithdrawalAggregator.hashAggregationData(nextAggregationData1)
-            assert(hashNextAggregationData0 == currentAggregationData.prevH0)
-            assert(hashNextAggregationData1 == currentAggregationData.prevH1)
+            let outAmt0 = 0n
+            let outAmt1 = 0n
+            if (isLastAggregationLevel) {
+                const hashWithdrawalData0 = WithdrawalAggregator.hashWithdrawalData(withdrawalData0)
+                const hashWithdrawalData1 = WithdrawalAggregator.hashWithdrawalData(withdrawalData1)
+                assert(hashWithdrawalData0 == currentAggregationData.prevH0)
+                assert(hashWithdrawalData1 == currentAggregationData.prevH1)
+                outAmt0 = withdrawalData0.amount
+                outAmt1 = withdrawalData1.amount
+            } else {
+                const hashNextAggregationData0 = WithdrawalAggregator.hashAggregationData(nextAggregationData0)
+                const hashNextAggregationData1 = WithdrawalAggregator.hashAggregationData(nextAggregationData1)
+                assert(hashNextAggregationData0 == currentAggregationData.prevH0)
+                assert(hashNextAggregationData1 == currentAggregationData.prevH1)
+                outAmt0 = nextAggregationData0.sumAmt
+                outAmt1 = nextAggregationData1.sumAmt
+            }
 
             let expanderSPK = prevTxExpander.contractSPK
             if (isPrevTxBridge) {
@@ -161,11 +177,10 @@ export class WithdrawalExpander extends SmartContract {
             }
 
             hashOutputs = sha256(
-                GeneralUtils.getContractOutput(nextAggregationData0.sumAmt, expanderSPK) +
-                GeneralUtils.getContractOutput(nextAggregationData1.sumAmt, expanderSPK) +
+                GeneralUtils.getContractOutput(outAmt0, expanderSPK) +
+                GeneralUtils.getContractOutput(outAmt1, expanderSPK) +
                 GeneralUtils.getStateOutput(hashCurrentAggregationData)
             )
-
         }
 
         assert(
@@ -208,9 +223,15 @@ export class WithdrawalExpander extends SmartContract {
     static getHashPrevouts(
         txId: Sha256,
         feePrevout: ByteString,
-        isPrevTxBridge: boolean
+        isPrevTxBridge: boolean,
+        isExpandingPrevTxFirstOutput: boolean
     ): Sha256 {
-        const contractOutIdx = isPrevTxBridge ? toByteString('02000000') : toByteString('00000000')
+        let contractOutIdx = toByteString('00000000')
+        if (isPrevTxBridge) {
+            contractOutIdx = toByteString('02000000')
+        } else if (!isExpandingPrevTxFirstOutput) {
+            contractOutIdx = toByteString('01000000')
+        }
         return sha256(
             txId +
             contractOutIdx +

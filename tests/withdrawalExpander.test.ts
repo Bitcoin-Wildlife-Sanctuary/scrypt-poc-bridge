@@ -122,6 +122,12 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
             .to(myAddress, 3000)
             .to(myAddress, 3000)
             .to(myAddress, 3000)
+            .to(myAddress, 3000)
+            .to(myAddress, 3000)
+            .to(myAddress, 3000)
+            .to(myAddress, 3000)
+            .to(myAddress, 3000)
+            .to(myAddress, 3000)
             .change(myAddress)
             .feePerByte(2)
             .sign(myPrivateKey)
@@ -270,11 +276,12 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         prevTxBridgeVer.writeUInt32LE(bridgeWithdrawalRes.bridgeTx.version)
         let prevTxBridgeLocktime = Buffer.alloc(4)
         prevTxBridgeLocktime.writeUInt32LE(bridgeWithdrawalRes.bridgeTx.nLockTime)
-        let prevTxBridgeInputs = new btc.encoding.BufferWriter()
-        prevTxBridgeInputs.writeUInt8(bridgeWithdrawalRes.bridgeTx.inputs.length)
+        let prevTxBridgeInputsBW = new btc.encoding.BufferWriter()
+        prevTxBridgeInputsBW.writeUInt8(bridgeWithdrawalRes.bridgeTx.inputs.length)
         for (const input of bridgeWithdrawalRes.bridgeTx.inputs) {
-            input.toBufferWriter(prevTxBridgeInputs);
+            input.toBufferWriter(prevTxBridgeInputsBW);
         }
+        let prevTxBridgeInputs = prevTxBridgeInputsBW.toBuffer()
         let prevTxBridgeContractAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
         prevTxBridgeContractAmt.writeInt16LE(bridgeWithdrawalRes.bridgeTx.outputs[0].satoshis)
         let prevTxBridgeContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptBridgeP2TR.toBuffer()])
@@ -325,9 +332,12 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         let withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
         withdrawalData1AmtBuff.writeInt16LE(0)
 
-        let fundingPrevout = new btc.encoding.BufferWriter()
-        fundingPrevout.writeReverse(expanderTx0.inputs[1].prevTxId);
-        fundingPrevout.writeInt32LE(expanderTx0.inputs[1].outputIndex);
+        let isLastAggregationLevel = Buffer.from('', 'hex')
+
+        let fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx0.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx0.inputs[1].outputIndex);
+        let fundingPrevout = fundingPrevoutBW.toBuffer()
 
         let witnesses = [
             schnorrTrickData.preimageParts.txVersion,
@@ -352,7 +362,7 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
             isPrevTxBridge,
 
             prevTxBridgeVer,
-            prevTxBridgeInputs.toBuffer(),
+            prevTxBridgeInputs,
             prevTxBridgeContractSPK,
             prevTxBridgeExpanderSPK,
             prevTxBridgeContractAmt,
@@ -396,18 +406,1150 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
             withdrawalData1AddressBuff,
             withdrawalData1AmtBuff,
 
-            fundingPrevout.toBuffer(),
+            isLastAggregationLevel,
+
+            fundingPrevout,
 
             scriptExpander.toBuffer(),
             Buffer.from(cblockExpander, 'hex')
         ]
 
         expanderTx0.inputs[0].witnesses = witnesses
-        
+
         // Run locally
         let interpreter = new btc.Script.Interpreter()
         let flags = btc.Script.Interpreter.SCRIPT_VERIFY_WITNESS | btc.Script.Interpreter.SCRIPT_VERIFY_TAPROOT | btc.Script.Interpreter.SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS
         let res = interpreter.verify(new btc.Script(''), bridgeWithdrawalRes.bridgeTx.outputs[2].script, expanderTx0, 0, flags, expanderTx0.inputs[0].witnesses, bridgeWithdrawalRes.bridgeTx.outputs[2].satoshis)
+        expect(res).to.be.true
+
+
+        ////////////////////////////////
+        // Expansion of first branch. //
+        ////////////////////////////////
+        expanderUTXO = {
+            txId: expanderTx0.id,
+            outputIndex: 0,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx0.outputs[0].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 4,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[4].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[0].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[1].amount)
+
+        aggregationHash = withdrawalAggregationRes.withdrawalTree.levels[1][0]
+
+        opRetScript = new btc.Script(`6a20${aggregationHash}`)
+
+        const expanderTx1 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt0,
+                script: scriptExpanderP2TR
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt1,
+                script: scriptExpanderP2TR
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: 0,
+                script: opRetScript
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx1, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('01', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx0.version)
+        let prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx0.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        let prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx0.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx0.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx0.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(bridgeWithdrawalRes.expanderRoot, 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx0.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][0], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][1], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(Number(bridgeWithdrawalRes.expanderAmt))
+
+        currentAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][0], 'hex')
+        currentAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][1], 'hex')
+        currentAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        currentAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[0].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[0].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[1].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[1].amount))
+
+        isLastAggregationLevel = Buffer.from('01', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx1.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx1.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx1.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx0.outputs[0].script, expanderTx1, 0, flags, expanderTx1.inputs[0].witnesses, expanderTx0.outputs[0].satoshis)
+        expect(res).to.be.true
+
+
+        /////////////////////////////////
+        // Expansion of second branch. //
+        /////////////////////////////////
+        expanderUTXO = {
+            txId: expanderTx0.id,
+            outputIndex: 1,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx0.outputs[1].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 5,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[5].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[2].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[3].amount)
+
+        aggregationHash = withdrawalAggregationRes.withdrawalTree.levels[1][1]
+
+        opRetScript = new btc.Script(`6a20${aggregationHash}`)
+
+        const expanderTx2 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt0,
+                script: scriptExpanderP2TR
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt1,
+                script: scriptExpanderP2TR
+            }))
+            .addOutput(new btc.Transaction.Output({
+                satoshis: 0,
+                script: opRetScript
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx2, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx0.version)
+        prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx0.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx0.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx0.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx0.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(bridgeWithdrawalRes.expanderRoot, 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx0.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][0], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][1], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(Number(bridgeWithdrawalRes.expanderAmt))
+
+        currentAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][2], 'hex')
+        currentAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][3], 'hex')
+        currentAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        currentAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[2].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[2].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[3].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[3].amount))
+
+        isLastAggregationLevel = Buffer.from('01', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx2.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx2.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx2.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx0.outputs[1].script, expanderTx2, 0, flags, expanderTx2.inputs[0].witnesses, expanderTx0.outputs[1].satoshis)
+        expect(res).to.be.true
+
+
+        ///////////////////////
+        // Expansion leaf 0. //
+        ///////////////////////
+        expanderUTXO = {
+            txId: expanderTx1.id,
+            outputIndex: 0,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx1.outputs[0].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 6,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[6].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[0].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[1].amount)
+
+        const expanderTx3 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt0,
+                script: new btc.Script(myAddress)
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx3, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('01', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx1.version)
+        prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx1.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx1.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx1.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx1.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][0], 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx1.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][0], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][1], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        currentAggregationDataPrevH0 = Buffer.from('', 'hex')
+        currentAggregationDataPrevH1 = Buffer.from('', 'hex')
+        currentAggregationDataSumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('01', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[0].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[0].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[1].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[1].amount))
+
+        isLastAggregationLevel = Buffer.from('', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx3.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx3.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx3.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx1.outputs[0].script, expanderTx3, 0, flags, expanderTx3.inputs[0].witnesses, expanderTx1.outputs[0].satoshis)
+        expect(res).to.be.true
+        
+
+        ///////////////////////
+        // Expansion leaf 1. //
+        ///////////////////////
+        expanderUTXO = {
+            txId: expanderTx1.id,
+            outputIndex: 1,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx1.outputs[1].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 7,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[7].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[0].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[1].amount)
+
+        const expanderTx4 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt1,
+                script: new btc.Script(myAddress)
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx4, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx1.version)
+        prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx1.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx1.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx1.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx1.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][0], 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx1.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][0], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][1], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        currentAggregationDataPrevH0 = Buffer.from('', 'hex')
+        currentAggregationDataPrevH1 = Buffer.from('', 'hex')
+        currentAggregationDataSumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('01', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[0].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[0].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[1].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[1].amount))
+
+        isLastAggregationLevel = Buffer.from('', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx4.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx4.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx4.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx1.outputs[0].script, expanderTx4, 0, flags, expanderTx4.inputs[0].witnesses, expanderTx1.outputs[0].satoshis)
+        expect(res).to.be.true
+
+
+        ///////////////////////
+        // Expansion leaf 2. //
+        ///////////////////////
+        expanderUTXO = {
+            txId: expanderTx2.id,
+            outputIndex: 0,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx2.outputs[0].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 7,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[7].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[2].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[3].amount)
+
+        const expanderTx5 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt0,
+                script: new btc.Script(myAddress)
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx5, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('01', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx2.version)
+        prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx2.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx2.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx2.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx2.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][1], 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx2.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][2], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][3], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        currentAggregationDataPrevH0 = Buffer.from('', 'hex')
+        currentAggregationDataPrevH1 = Buffer.from('', 'hex')
+        currentAggregationDataSumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('01', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[2].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[2].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[3].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[3].amount))
+
+        isLastAggregationLevel = Buffer.from('', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx5.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx5.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx5.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx2.outputs[0].script, expanderTx5, 0, flags, expanderTx5.inputs[0].witnesses, expanderTx2.outputs[0].satoshis)
+        expect(res).to.be.true
+        
+        
+        ///////////////////////
+        // Expansion leaf 3. //
+        ///////////////////////
+        expanderUTXO = {
+            txId: expanderTx2.id,
+            outputIndex: 1,
+            script: scriptExpanderP2TR,
+            satoshis: expanderTx2.outputs[1].satoshis
+        }
+        fundingUTXO = {
+            address: myAddress.toString(),
+            txId: txFundsBridge.id,
+            outputIndex: 8,
+            script: new btc.Script(myAddress),
+            satoshis: txFundsBridge.outputs[8].satoshis
+        }
+
+        splitAmt0 = Number(withdrawalAggregationRes.withdrawalDataList[2].amount)
+        splitAmt1 = Number(withdrawalAggregationRes.withdrawalDataList[3].amount)
+
+        const expanderTx6 = new btc.Transaction()
+            .from(
+                [
+                    expanderUTXO,
+                    fundingUTXO
+                ]
+            )
+            .addOutput(new btc.Transaction.Output({
+                satoshis: splitAmt1,
+                script: new btc.Script(myAddress)
+            }))
+            .sign(myPrivateKey)
+
+        schnorrTrickData = await schnorrTrick(expanderTx6, tapleafExpander, 0)
+        sigOperator = btc.crypto.Schnorr.sign(seckeyOperator, schnorrTrickData.sighash.hash);
+
+        isExpandingPrevTxFirstOutput = Buffer.from('', 'hex')
+        isPrevTxBridge = Buffer.from('', 'hex')
+
+        prevTxBridgeVer = Buffer.from('', 'hex')
+        prevTxBridgeLocktime = Buffer.from('', 'hex')
+        prevTxBridgeInputs = Buffer.from('', 'hex')
+        prevTxBridgeContractAmt = Buffer.from('', 'hex')
+        prevTxBridgeContractSPK = Buffer.from('', 'hex')
+        prevTxBridgeExpanderSPK = Buffer.from('', 'hex')
+        prevTxBridgeAccountsRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderRoot = Buffer.from('', 'hex')
+        prevTxBridgeExpanderAmt = Buffer.from('', 'hex')
+        prevTxBridgeDepositAggregatorSPK = Buffer.from('', 'hex')
+        prevTxBridgeWithdrawalAggregatorSPK = Buffer.from('', 'hex')
+
+        prevTxExpanderVer = Buffer.alloc(4)
+        prevTxExpanderVer.writeUInt32LE(expanderTx2.version)
+        prevTxExpanderInputContractBW = new btc.encoding.BufferWriter()
+        expanderTx2.inputs[0].toBufferWriter(prevTxExpanderInputContractBW);
+        prevTxExpanderInputContract = prevTxExpanderInputContractBW.toBuffer()
+        prevTxExpanderInputFeeBW = new btc.encoding.BufferWriter()
+        expanderTx2.inputs[1].toBufferWriter(prevTxExpanderInputFeeBW);
+        prevTxExpanderInputFee = prevTxExpanderInputFeeBW.toBuffer()
+        prevTxExpanderContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptExpanderP2TR.toBuffer()])
+        prevTxExpanderOutput0Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput0Amt.writeInt16LE(expanderTx2.outputs[0].satoshis)
+        prevTxExpanderOutput1Amt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevTxExpanderOutput1Amt.writeInt16LE(expanderTx2.outputs[1].satoshis)
+        prevTxExpanderHashData = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[1][1], 'hex')
+        prevTxExpanderLocktime = Buffer.alloc(4)
+        prevTxExpanderLocktime.writeUInt32LE(expanderTx2.nLockTime)
+
+        prevAggregationDataPrevH0 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][2], 'hex')
+        prevAggregationDataPrevH1 = Buffer.from(withdrawalAggregationRes.withdrawalTree.levels[0][3], 'hex')
+        prevAggregationDataSumAmt = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        prevAggregationDataSumAmt.writeInt16LE(splitAmt0 + splitAmt1)
+
+        currentAggregationDataPrevH0 = Buffer.from('', 'hex')
+        currentAggregationDataPrevH1 = Buffer.from('', 'hex')
+        currentAggregationDataSumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData0PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData0PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData0SumAmt = Buffer.from('', 'hex')
+
+        nextAggregationData1PrevH0 = Buffer.from('', 'hex')
+        nextAggregationData1PrevH1 = Buffer.from('', 'hex')
+        nextAggregationData1SumAmt = Buffer.from('', 'hex')
+
+        isExpandingLeaves = Buffer.from('01', 'hex')
+
+        withdrawalData0AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[2].address, 'hex')
+        withdrawalData0AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData0AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[2].amount))
+
+        withdrawalData1AddressBuff = Buffer.from(withdrawalAggregationRes.withdrawalDataList[3].address, 'hex')
+        withdrawalData1AmtBuff = Buffer.alloc(2) // Bigint witnesses need to be minimally encoded! TODO: Do this automatically.
+        withdrawalData1AmtBuff.writeInt16LE(Number(withdrawalAggregationRes.withdrawalDataList[3].amount))
+
+        isLastAggregationLevel = Buffer.from('', 'hex')
+
+        fundingPrevoutBW = new btc.encoding.BufferWriter()
+        fundingPrevoutBW.writeReverse(expanderTx6.inputs[1].prevTxId);
+        fundingPrevoutBW.writeInt32LE(expanderTx6.inputs[1].outputIndex);
+        fundingPrevout = fundingPrevoutBW.toBuffer()
+
+        witnesses = [
+            schnorrTrickData.preimageParts.txVersion,
+            schnorrTrickData.preimageParts.nLockTime,
+            schnorrTrickData.preimageParts.hashPrevouts,
+            schnorrTrickData.preimageParts.hashSpentAmounts,
+            schnorrTrickData.preimageParts.hashScripts,
+            schnorrTrickData.preimageParts.hashSequences,
+            schnorrTrickData.preimageParts.hashOutputs,
+            schnorrTrickData.preimageParts.spendType,
+            schnorrTrickData.preimageParts.inputNumber,
+            schnorrTrickData.preimageParts.tapleafHash,
+            schnorrTrickData.preimageParts.keyVersion,
+            schnorrTrickData.preimageParts.codeseparatorPosition,
+            schnorrTrickData.sighash.hash,
+            schnorrTrickData._e,
+            Buffer.from([schnorrTrickData.eLastByte]),
+
+            sigOperator,
+
+            isExpandingPrevTxFirstOutput,
+            isPrevTxBridge,
+
+            prevTxBridgeVer,
+            prevTxBridgeInputs,
+            prevTxBridgeContractSPK,
+            prevTxBridgeExpanderSPK,
+            prevTxBridgeContractAmt,
+            prevTxBridgeAccountsRoot,
+            prevTxBridgeExpanderRoot,
+            prevTxBridgeExpanderAmt,
+            prevTxBridgeDepositAggregatorSPK,
+            prevTxBridgeWithdrawalAggregatorSPK,
+            prevTxBridgeLocktime,
+
+            prevTxExpanderVer,
+            prevTxExpanderInputContract,
+            prevTxExpanderInputFee,
+            prevTxExpanderContractSPK,
+            prevTxExpanderOutput0Amt,
+            prevTxExpanderOutput1Amt,
+            prevTxExpanderHashData,
+            prevTxExpanderLocktime,
+
+            prevAggregationDataPrevH0,
+            prevAggregationDataPrevH1,
+            prevAggregationDataSumAmt,
+
+            currentAggregationDataPrevH0,
+            currentAggregationDataPrevH1,
+            currentAggregationDataSumAmt,
+
+            nextAggregationData0PrevH0,
+            nextAggregationData0PrevH1,
+            nextAggregationData0SumAmt,
+
+            nextAggregationData1PrevH0,
+            nextAggregationData1PrevH1,
+            nextAggregationData1SumAmt,
+
+            isExpandingLeaves,
+
+            withdrawalData0AddressBuff,
+            withdrawalData0AmtBuff,
+
+            withdrawalData1AddressBuff,
+            withdrawalData1AmtBuff,
+
+            isLastAggregationLevel,
+
+            fundingPrevout,
+
+            scriptExpander.toBuffer(),
+            Buffer.from(cblockExpander, 'hex')
+        ]
+
+        expanderTx6.inputs[0].witnesses = witnesses
+
+        // Run locally
+        res = interpreter.verify(new btc.Script(''), expanderTx2.outputs[0].script, expanderTx6, 0, flags, expanderTx6.inputs[0].witnesses, expanderTx2.outputs[0].satoshis)
         expect(res).to.be.true
 
     })
