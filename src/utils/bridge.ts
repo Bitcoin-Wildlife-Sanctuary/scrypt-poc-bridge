@@ -8,7 +8,8 @@ import { myPrivateKey } from '../utils/privateKey';
 import { WithdrawalData } from '../contracts/withdrawalAggregator';
 import { MERKLE_PROOF_MAX_DEPTH, MerkleProof, NodePos } from '../contracts/merklePath';
 import { buildMerkleTree, MerkleTree } from '../utils/merkleTree';
-
+import { GeneralUtils } from '../contracts/generalUtils';
+import { myAddress as operatorAddress, myPrivateKey as operatorPrivKey } from '../utils/privateKey';
 
 export function initAccountsTree(accountsData: AccountData[]): MerkleTree {
     if (accountsData.length !== Math.pow(2, MERKLE_PROOF_MAX_DEPTH)) {
@@ -21,6 +22,80 @@ export function initAccountsTree(accountsData: AccountData[]): MerkleTree {
     buildMerkleTree(leaves, tree);
 
     return tree
+}
+
+export function deployBridge(
+    operatorUTXOs: UTXO[],
+    txFee: number,
+    scriptBridgeP2TR: btc.Script,
+    scriptDepositAggregatorP2TR: btc.Script,
+    scriptWithdrawalAggregatorP2TR: btc.Script,
+) {
+    // Create ampty accounts tree.
+    const numAccounts = Math.pow(2, MERKLE_PROOF_MAX_DEPTH);
+    const accounts: AccountData[] = Array(numAccounts).fill(
+        {
+            address: GeneralUtils.NULL_ADDRESS,
+            balance: 0n
+        }
+    )
+    let accountsTree = initAccountsTree(accounts)
+
+    const txFunds = new btc.Transaction()
+        .from(
+            operatorUTXOs
+        )
+        .to(operatorAddress, txFee)
+        .change(operatorAddress)
+        .feePerByte(2)
+        .sign(operatorPrivKey)
+
+    operatorUTXOs.length = 0
+    operatorUTXOs.push(
+        {
+            address: operatorAddress.toString(),
+            txId: txFunds.id,
+            outputIndex: txFunds.outputs.length - 1,
+            script: new btc.Script(operatorAddress),
+            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+        }
+    )
+
+    let stateHash = Bridge.getStateHash(
+        accountsTree.getRoot(),
+        toByteString('22' + scriptDepositAggregatorP2TR.toHex()),
+        toByteString('22' + scriptWithdrawalAggregatorP2TR.toHex()),
+        toByteString('')
+    )
+    let opRetScript = new btc.Script(`6a20${stateHash}`)
+
+    let fundingUTXO: UTXO = {
+        address: operatorAddress.toString(),
+        txId: txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: txFunds.outputs[0].satoshis
+    }
+
+    const deployTx = new btc.Transaction()
+        .from(fundingUTXO)
+        .addOutput(new btc.Transaction.Output({
+            satoshis: 546,
+            script: scriptBridgeP2TR
+        }))
+        .addOutput(new btc.Transaction.Output({
+            satoshis: 0,
+            script: opRetScript
+        }))
+        .sign(operatorPrivKey)
+
+    return {
+        bridgeData: {
+            accounts,
+            accountsTree,
+        },
+        deployTx
+    }
 }
 
 function prepareDepositsWitnessArray(deposits: DepositData[]): Buffer[] {
@@ -140,9 +215,10 @@ function prepareMerkleProofsWitnessArray(proofs: MerkleProof[]): Buffer[] {
 }
 
 export async function performBridgeDeposit(
+    operatorUTXOs: UTXO[],
+    txFee: number,
     prevBridgeTx: btc.Transaction,
     depositAggregationRes: any,
-    fundingUTXO: UTXO,
     accounts: AccountData[],
     accountsTree: MerkleTree,
 
@@ -161,6 +237,34 @@ export async function performBridgeDeposit(
     prevTxExpanderRoot = Buffer.from('', 'hex'),
     prevTxExpanderAmt = Buffer.from('', 'hex'),
 ) {
+    const txFunds = new btc.Transaction()
+        .from(
+            operatorUTXOs
+        )
+        .to(operatorAddress, txFee)
+        .change(operatorAddress)
+        .feePerByte(2)
+        .sign(operatorPrivKey)
+
+    operatorUTXOs.length = 0
+    operatorUTXOs.push(
+        {
+            address: operatorAddress.toString(),
+            txId: txFunds.id,
+            outputIndex: txFunds.outputs.length - 1,
+            script: new btc.Script(operatorAddress),
+            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+        }
+    )
+
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: txFunds.outputs[0].satoshis
+    }
+
     let bridgeUTXO = {
         txId: prevBridgeTx.id,
         outputIndex: 0,
@@ -226,7 +330,7 @@ export async function performBridgeDeposit(
             satoshis: 0,
             script: opRetScript
         }))
-        .sign(myPrivateKey)
+        .sign(operatorPrivKey)
 
     let schnorrTrickDataIn0 = await schnorrTrick(bridgeTx, tapleafBridge, 0)
     let schnorrTrickDataIn1 = await schnorrTrick(bridgeTx, tapleafDepositAggregator, 1)
@@ -423,9 +527,10 @@ export async function performBridgeDeposit(
 }
 
 export async function performBridgeWithdrawal(
+    operatorUTXOs: UTXO[],
+    txFee: number,
     prevBridgeTx: btc.Transaction,
     withdrawalAggregationRes: any,
-    fundingUTXO: UTXO,
     accounts: AccountData[],
     accountsTree: MerkleTree,
 
@@ -444,6 +549,34 @@ export async function performBridgeWithdrawal(
     prevTxExpanderRoot = Buffer.from('', 'hex'),
     prevTxExpanderAmt = Buffer.from('', 'hex'),
 ) {
+    const txFunds = new btc.Transaction()
+        .from(
+            operatorUTXOs
+        )
+        .to(operatorAddress, txFee)
+        .change(operatorAddress)
+        .feePerByte(2)
+        .sign(operatorPrivKey)
+
+    operatorUTXOs.length = 0
+    operatorUTXOs.push(
+        {
+            address: operatorAddress.toString(),
+            txId: txFunds.id,
+            outputIndex: txFunds.outputs.length - 1,
+            script: new btc.Script(operatorAddress),
+            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+        }
+    )
+    
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: txFunds.outputs[0].satoshis
+    }
+    
     let bridgeUTXO = {
         txId: prevBridgeTx.id,
         outputIndex: 0,
@@ -487,7 +620,7 @@ export async function performBridgeWithdrawal(
 
         totalAmtWithdrawn += withdrawal.amount
     }
-    
+
     let expanderRoot = withdrawalAggregationRes.withdrawalTree.getRoot()
 
     let stateHash = Bridge.getStateHash(
@@ -711,7 +844,7 @@ export async function performBridgeWithdrawal(
     ]
 
     bridgeTx.inputs[1].witnesses = witnessesIn1
-    
+
     return {
         bridgeTx,
         accounts,

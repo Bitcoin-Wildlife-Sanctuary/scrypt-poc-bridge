@@ -1,14 +1,19 @@
 // @ts-ignore
 import btc = require('bitcore-lib-inquisition');
+import { Tap } from '@cmdcode/tapscript'  // Requires node >= 19
 import axios from 'axios';
 import * as ecurve from 'ecurve';
 import { sha256 } from 'js-sha256';
 // @ts-ignore
 import BigInteger = require('bigi')
-import { DummyProvider, DefaultProvider, TestWallet, bsv } from 'scrypt-ts'
+import { DummyProvider, DefaultProvider, TestWallet, bsv, PubKey, toByteString } from 'scrypt-ts'
 import { myPrivateKey } from './privateKey'
 
 import * as dotenv from 'dotenv'
+import { Bridge } from '../contracts/bridge';
+import { DepositAggregator } from '../contracts/depositAggregator';
+import { WithdrawalAggregator } from '../contracts/withdrawalAggregator';
+import { WithdrawalExpander } from '../contracts/withdrawalExpander';
 
 // Load the .env file
 dotenv.config()
@@ -232,13 +237,97 @@ export async function schnorrTrick(
 }
 
 export function hexLEtoDecimal(hexLE: string): number {
-  const bytes = hexLE.match(/.{2}/g);
+    const bytes = hexLE.match(/.{2}/g);
 
-  if (!bytes) {
-    throw new Error("Invalid hexadecimal format.");
-  }
+    if (!bytes) {
+        throw new Error("Invalid hexadecimal format.");
+    }
 
-  const hexBE = bytes.reverse().join("");
-  return parseInt(hexBE, 16);
+    const hexBE = bytes.reverse().join("");
+    return parseInt(hexBE, 16);
 }
 
+export function createContractInstances(
+    pubkeyOperator: btc.PublicKey
+) {
+    const expander = new WithdrawalExpander(
+        PubKey(toByteString(pubkeyOperator.toString()))
+    )
+
+    const scriptExpander = expander.lockingScript
+    const tapleafExpander = Tap.encodeScript(scriptExpander.toBuffer())
+
+    const [tpubkeyExpander, cblockExpander] = Tap.getPubKey(DISABLE_KEYSPEND_PUBKEY, { target: tapleafExpander })
+    const scriptExpanderP2TR = new btc.Script(`OP_1 32 0x${tpubkeyExpander}}`)
+
+
+    const bridge = new Bridge(
+        PubKey(toByteString(pubkeyOperator.toString())),
+        toByteString('22' + scriptExpanderP2TR.toBuffer().toString('hex'))
+    )
+
+    const scriptBridge = bridge.lockingScript
+    const tapleafBridge = Tap.encodeScript(scriptBridge.toBuffer())
+
+    const [tpubkeyBridge, cblockBridge] = Tap.getPubKey(DISABLE_KEYSPEND_PUBKEY, { target: tapleafBridge })
+    const scriptBridgeP2TR = new btc.Script(`OP_1 32 0x${tpubkeyBridge}}`)
+
+
+    const depositAggregator = new DepositAggregator(
+        PubKey(toByteString(pubkeyOperator.toString())),
+        toByteString(scriptBridgeP2TR.toBuffer().toString('hex'))
+    )
+
+    const scriptDepositAggregator = depositAggregator.lockingScript
+    const tapleafDepositAggregator = Tap.encodeScript(scriptDepositAggregator.toBuffer())
+
+    const [tpubkeyDepositAggregator, cblockDepositAggregator] = Tap.getPubKey(DISABLE_KEYSPEND_PUBKEY, { target: tapleafDepositAggregator })
+    const scriptDepositAggregatorP2TR = new btc.Script(`OP_1 32 0x${tpubkeyDepositAggregator}}`)
+
+
+    const withdrawalAggregator = new WithdrawalAggregator(
+        PubKey(toByteString(pubkeyOperator.toString())),
+        toByteString(scriptBridgeP2TR.toBuffer().toString('hex'))
+    )
+
+    const scriptWithdrawalAggregator = withdrawalAggregator.lockingScript
+    const tapleafWithdrawalAggregator = Tap.encodeScript(scriptWithdrawalAggregator.toBuffer())
+
+    const [tpubkeyWithdrawalAggregator, cblockWithdrawalAggregator] = Tap.getPubKey(DISABLE_KEYSPEND_PUBKEY, { target: tapleafWithdrawalAggregator })
+    const scriptWithdrawalAggregatorP2TR = new btc.Script(`OP_1 32 0x${tpubkeyWithdrawalAggregator}}`)
+
+    return {
+        depositAggregator: {
+            instance: depositAggregator,
+            script: scriptDepositAggregator,
+            scriptP2TR: scriptDepositAggregatorP2TR,
+            tapleaf: tapleafDepositAggregator,
+            tpubkey: tpubkeyDepositAggregator,
+            cblock: cblockDepositAggregator
+        },
+        withdrawalAggregator: {
+            instance: withdrawalAggregator,
+            script: scriptWithdrawalAggregator,
+            scriptP2TR: scriptWithdrawalAggregatorP2TR,
+            tapleaf: tapleafWithdrawalAggregator,
+            tpubkey: tpubkeyWithdrawalAggregator,
+            cblock: cblockWithdrawalAggregator
+        },
+        bridge: {
+            instance: bridge,
+            script: scriptBridge,
+            scriptP2TR: scriptBridgeP2TR,
+            tapleaf: tapleafBridge,
+            tpubkey: tpubkeyBridge,
+            cblock: cblockBridge
+        },
+        withdrawalExpander: {
+            instance: expander,
+            script: scriptExpander,
+            scriptP2TR: scriptExpanderP2TR,
+            tapleaf: tapleafExpander,
+            tpubkey: tpubkeyExpander,
+            cblock: cblockExpander
+        }
+    }
+}
