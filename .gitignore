@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 artifacts/
+sandbox/
 **/.env
 **/scrypt.index.json
 tsconfig-scryptTS.json

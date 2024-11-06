@@ -1,6 +1,5 @@
 import { ByteString, hash256, Sha256, toByteString } from 'scrypt-ts';
 import { MerkleProof, Node, NodePos, MERKLE_PROOF_MAX_DEPTH } from '../../src/contracts/merklePath';
-import { GeneralUtils } from '../../src/contracts/generalUtils';
 
 export class MerkleTree {
     levels: Sha256[][];

@@ -7,22 +7,36 @@ import { Bridge, AccountData } from "../src/contracts/bridge"
 import { DepositAggregator } from "../src/contracts/depositAggregator"
 import { GeneralUtils } from "../src/contracts/generalUtils"
 import { MERKLE_PROOF_MAX_DEPTH } from "../src/contracts/merklePath"
-import { AggregationData, WithdrawalAggregator } from "../src/contracts/withdrawalAggregator"
+import { WithdrawalAggregator } from "../src/contracts/withdrawalAggregator"
 import { WithdrawalExpander } from "../src/contracts/withdrawalExpander"
-import { initAccountsTree, performBridgeDeposit, performBridgeWithdrawal } from "./bridge.test"
-import { performDepositAggregation } from "./depositAggregator.test"
-import { myAddress, myPrivateKey, myPublicKey } from "./utils/privateKey"
-import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, hexLEtoDecimal, schnorrTrick } from "./utils/txHelper"
-import { performWithdrawalAggregation } from "./withdrawalAggregator.test"
-import { AggregatorUtils } from '../src/contracts/aggregatorUtils';
+import { initAccountsTree, performBridgeDeposit, performBridgeWithdrawal } from "../src/utils/bridge"
+import { performDepositAggregation } from '../src/utils/depositAggregation'
+import { myAddress, myPrivateKey, myPublicKey } from "../src/utils/privateKey"
+import { DISABLE_KEYSPEND_PUBKEY, fetchP2WPKHUtxos, hexLEtoDecimal, schnorrTrick } from "../src/utils/txHelper"
+import { performWithdrawalAggregation } from '../src/utils/withrawalAggreagation'
+import { DUST_AMOUNT } from 'bitcore-lib-inquisition/lib/transaction';
+import { MerkleTree } from '../src/utils/merkleTree';
+
+
+export async function performWithdrawalExpansion(
+    operatorUTXOs: UTXO[],
+    accounts: AccountData[],
+    accountsTree: MerkleTree,
+    txFee: number,
+
+) {
+
+}
 
 describe('Test SmartContract `WithdrawalExpander`', () => {
     let seckeyOperator
     let pubkeyOperator
+    let addrOperator
 
     before(async () => {
         seckeyOperator = myPrivateKey
         pubkeyOperator = myPublicKey
+        addrOperator = myAddress
 
         await DepositAggregator.loadArtifact()
         await WithdrawalAggregator.loadArtifact()
@@ -80,24 +94,98 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
 
         ///////////////////////////////////////
 
-        let utxos = await fetchP2WPKHUtxos(myAddress)
-        if (utxos.length === 0) {
+        let operatorUTXOs = await fetchP2WPKHUtxos(myAddress)
+        if (operatorUTXOs.length === 0) {
             throw new Error(`No UTXO's for address: ${myAddress.toString()}`)
         }
 
         const depositAmounts = [1329n, 1400n, 1500n, 1888n]
+        const txDepositFunds = new btc.Transaction()
+            .from(operatorUTXOs)
+            .to(myAddress, Number(depositAmounts[0]))
+            .to(myAddress, Number(depositAmounts[1]))
+            .to(myAddress, Number(depositAmounts[2]))
+            .to(myAddress, Number(depositAmounts[3]))
+            .change(addrOperator)
+            .feePerByte(2)
+            .sign(seckeyOperator)
+
+        operatorUTXOs.length = 0
+        operatorUTXOs.push(
+            {
+                address: addrOperator.toString(),
+                txId: txDepositFunds.id,
+                outputIndex: txDepositFunds.outputs.length - 1,
+                script: new btc.Script(addrOperator),
+                satoshis: txDepositFunds.outputs[txDepositFunds.outputs.length - 1].satoshis
+            }
+        )
+
+        const deposits: any[] = []
+        for (let i = 0; i < txDepositFunds.outputs.length - 1; i++) {
+            deposits.push(
+                {
+                    from: {
+                        txId: txDepositFunds.id,
+                        outputIndex: i,
+                        address: myAddress.toString(),
+                        satoshis: txDepositFunds.outputs[i].satoshis
+                    },
+                    address: myAddress.toString()
+                },
+            )
+        }
         const depositTxFee = 3000
 
         const depositAggregationRes = await performDepositAggregation(
-            utxos, depositAmounts, depositTxFee, scriptDepositAggregatorP2TR, cblockDepositAggregator,
+            operatorUTXOs, deposits, depositTxFee, scriptDepositAggregatorP2TR, cblockDepositAggregator,
             scriptDepositAggregator, tapleafDepositAggregator, seckeyOperator
         )
 
+
         const withdrawalAmounts = [1000n, 800n, 700n, 998n]
+        
+        const txWithdrawalFunds = new btc.Transaction()
+            .from(operatorUTXOs)
+            .to(myAddress, DUST_AMOUNT)
+            .to(myAddress, DUST_AMOUNT)
+            .to(myAddress, DUST_AMOUNT)
+            .to(myAddress, DUST_AMOUNT)
+            .change(addrOperator)
+            .feePerByte(2)
+            .sign(seckeyOperator)
+
+        operatorUTXOs.length = 0
+        operatorUTXOs.push(
+            {
+                address: addrOperator.toString(),
+                txId: txWithdrawalFunds.id,
+                outputIndex: txWithdrawalFunds.outputs.length - 1,
+                script: new btc.Script(addrOperator),
+                satoshis: txWithdrawalFunds.outputs[txWithdrawalFunds.outputs.length - 1].satoshis
+            }
+        )
+
+        const withdrawals: any[] = []
+        for (let i = 0; i < txWithdrawalFunds.outputs.length - 1; i++) {
+            withdrawals.push(
+                {
+                    from: {
+                        txId: txWithdrawalFunds.id,
+                        outputIndex: i,
+                        address: myAddress.toString(),
+                        satoshis: txWithdrawalFunds.outputs[i].satoshis
+                    },
+                    address: myAddress.toString(),
+                    amount: Number(withdrawalAmounts[i])
+                },
+            )
+        }
+
         const withdrawalTxFee = 3000
 
         const withdrawalAggregationRes = await performWithdrawalAggregation(
-            utxos, withdrawalAmounts, withdrawalTxFee, scriptWithdrawalAggregatorP2TR, cblockWithdrawalAggregator,
+            operatorUTXOs, withdrawals, withdrawalTxFee, scriptWithdrawalAggregatorP2TR, cblockWithdrawalAggregator,
             scriptWithdrawalAggregator, tapleafWithdrawalAggregator, seckeyOperator
         )
 
@@ -116,7 +204,7 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         ///////////////////
         const txFundsBridge = new btc.Transaction()
             .from(
-                utxos
+                operatorUTXOs
             )
             .to(myAddress, 3000)
             .to(myAddress, 3000)
@@ -999,7 +1087,7 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         // Run locally
         res = interpreter.verify(new btc.Script(''), expanderTx1.outputs[0].script, expanderTx3, 0, flags, expanderTx3.inputs[0].witnesses, expanderTx1.outputs[0].satoshis)
         expect(res).to.be.true
-        
+
 
         ///////////////////////
         // Expansion leaf 1. //
@@ -1367,8 +1455,8 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         // Run locally
         res = interpreter.verify(new btc.Script(''), expanderTx2.outputs[0].script, expanderTx5, 0, flags, expanderTx5.inputs[0].witnesses, expanderTx2.outputs[0].satoshis)
         expect(res).to.be.true
-        
-        
+
+
         ///////////////////////
         // Expansion leaf 3. //
         ///////////////////////
@@ -1551,7 +1639,6 @@ describe('Test SmartContract `WithdrawalExpander`', () => {
         // Run locally
         res = interpreter.verify(new btc.Script(''), expanderTx2.outputs[0].script, expanderTx6, 0, flags, expanderTx6.inputs[0].witnesses, expanderTx2.outputs[0].satoshis)
         expect(res).to.be.true
-
     })
 
 })
