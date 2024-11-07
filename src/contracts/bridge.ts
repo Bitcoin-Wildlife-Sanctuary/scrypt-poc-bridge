@@ -12,7 +12,6 @@ import {
     Sha256,
     FixedArray,
     Addr,
-    int2ByteString,
 } from 'scrypt-ts'
 import { SHPreimage, SigHashUtils } from './sigHashUtils'
 import { AggregatorTransaction, AggregatorUtils } from './aggregatorUtils'
@@ -70,15 +69,8 @@ export class Bridge extends SmartContract {
         deposits: FixedArray<DepositData, typeof MAX_NODES_AGGREGATED>,
         accounts: FixedArray<AccountData, typeof MAX_NODES_AGGREGATED>,
 
-        depositProof0: MerkleProof,
-        depositProof1: MerkleProof,
-        depositProof2: MerkleProof,
-        depositProof3: MerkleProof,
-
-        accountProof0: MerkleProof,
-        accountProof1: MerkleProof,
-        accountProof2: MerkleProof,
-        accountProof3: MerkleProof,
+        depositProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>,
+        accountProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -106,39 +98,16 @@ export class Bridge extends SmartContract {
         assert(prevTx.depositAggregatorSPK == aggregatorTx.outputContractSPK)
 
         // Check deposit aggregation result and construct new accounts root.
-        // TODO: This should be put into a for loop but is currently manually unrolled in source
-        //       because of an issue with the sCrypt compiler using OP_MUL when accessing array
-        //       elements inside a loop (e.g. arr[i]). Change once compiler is updated.
+        // Also sum up all deposit amounts.
         let accountsRootNew: Sha256 = prevTx.accountsRoot
-        const deposit0 = deposits[0]
-        if (deposit0.address !== toByteString('')) {
-            accountsRootNew = this.applyDeposit(
-                deposit0, depositProof0, aggregatorTx.hashData, accounts[0], accountProof0, accountsRootNew
-            )
-        }
-        const deposit1 = deposits[1]
-        if (deposit1.address !== toByteString('')) {
-            accountsRootNew = this.applyDeposit(
-                deposit1, depositProof1, aggregatorTx.hashData, accounts[1], accountProof1, accountsRootNew
-            )
-        }
-        const deposit2 = deposits[2]
-        if (deposit2.address !== toByteString('')) {
-            accountsRootNew = this.applyDeposit(
-                deposit2, depositProof2, aggregatorTx.hashData, accounts[2], accountProof2, accountsRootNew
-            )
-        }
-        const deposit3 = deposits[3]
-        if (deposit3.address !== toByteString('')) {
-            accountsRootNew = this.applyDeposit(
-                deposit3, depositProof3, aggregatorTx.hashData, accounts[3], accountProof3, accountsRootNew
-            )
-        }
-
-        // Sum up all deposit amounts.
         let totalAmtDeposited = 0n
         for (let i = 0; i < MAX_NODES_AGGREGATED; i++) {
             const deposit = deposits[i]
+            if (deposit.address != toByteString('')) {
+                accountsRootNew = this.applyDeposit(
+                    deposits[i], depositProofs[i], aggregatorTx.hashData, accounts[i], accountProofs[i], accountsRootNew
+                )
+            }
             totalAmtDeposited += deposit.amount
         }
 
@@ -176,15 +145,8 @@ export class Bridge extends SmartContract {
 
         intermediateSumsArr: FixedArray<IntermediateValues, typeof MAX_NODES_AGGREGATED>,
 
-        withdrawalProof0: MerkleProof,
-        withdrawalProof1: MerkleProof,
-        withdrawalProof2: MerkleProof,
-        withdrawalProof3: MerkleProof,
-
-        accountProof0: MerkleProof,
-        accountProof1: MerkleProof,
-        accountProof2: MerkleProof,
-        accountProof3: MerkleProof,
+        withdrawalProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>,
+        accountProofs: FixedArray<MerkleProof, typeof MAX_NODES_AGGREGATED>
     ) {
         // Check sighash preimage.
         const s = SigHashUtils.checkSHPreimage(shPreimage)
@@ -212,39 +174,17 @@ export class Bridge extends SmartContract {
         assert(prevTx.withdrawalAggregatorSPK == aggregatorTx.outputContractSPK)
 
         // Check withdrawal aggregation result and construct new accounts root.
-        // TODO: This should be put into a for loop but is currently manually unrolled in source
-        //       because of an issue with the sCrypt compiler using OP_MUL when accessing array
-        //       elements inside a loop (e.g. arr[i]). Change once compiler is updated.
+        // Also sum up all deposit withdrawn.
         let accountsRootNew: Sha256 = prevTx.accountsRoot
-        const withdrawal0 = withdrawals[0]
-        if (withdrawal0.address !== toByteString('')) {
-            accountsRootNew = this.applyWithdrawal(
-                withdrawal0, withdrawalProof0, intermediateSumsArr[0], aggregatorTx.hashData, accounts[0], accountProof0, accountsRootNew
-            )
-        }
-        const withdrawal1 = withdrawals[1]
-        if (withdrawal1.address !== toByteString('')) {
-            accountsRootNew = this.applyWithdrawal(
-                withdrawal1, withdrawalProof1, intermediateSumsArr[1], aggregatorTx.hashData, accounts[1], accountProof1, accountsRootNew
-            )
-        }
-        const withdrawal2 = withdrawals[2]
-        if (withdrawal2.address !== toByteString('')) {
-            accountsRootNew = this.applyWithdrawal(
-                withdrawal2, withdrawalProof2, intermediateSumsArr[2], aggregatorTx.hashData, accounts[2], accountProof2, accountsRootNew
-            )
-        }
-        const withdrawal3 = withdrawals[3]
-        if (withdrawal3.address !== toByteString('')) {
-            accountsRootNew = this.applyWithdrawal(
-                withdrawal3, withdrawalProof3, intermediateSumsArr[3], aggregatorTx.hashData, accounts[3], accountProof3, accountsRootNew
-            )
-        }
-        
-        // Sum up all deposit withdrawn.
         let totalAmtWithdrawn = 0n
         for (let i = 0; i < MAX_NODES_AGGREGATED; i++) {
-            totalAmtWithdrawn += withdrawals[i].amount
+            const withdrawal = withdrawals[i]
+            if (withdrawal.address != toByteString('')) {
+                accountsRootNew = this.applyWithdrawal(
+                    withdrawal, withdrawalProofs[i], intermediateSumsArr[i], aggregatorTx.hashData, accounts[i], accountProofs[i], accountsRootNew
+                )
+            }
+            totalAmtWithdrawn += withdrawal.amount
         }
 
         // Substract total amount withrawn of the bridge output balance.
