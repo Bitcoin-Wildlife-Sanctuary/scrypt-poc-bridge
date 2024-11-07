@@ -74,28 +74,28 @@ describe('Test Full E2E Flow', () => {
                 },
             )
         }
-        const depositTxFee = 3000
 
         const depositAggregationRes = await performDepositAggregation(
             operatorUTXOs,
             deposits,
-            depositTxFee,
             contracts.depositAggregator.scriptP2TR,
             contracts.depositAggregator.cblock,
             contracts.depositAggregator.script,
             contracts.depositAggregator.tapleaf,
-            seckeyOperator
+            seckeyOperator,
+            2
         )
-
+        
+        operatorUTXOs = depositAggregationRes.operatorUTXOs
 
         const withdrawalAmounts = [1000n, 800n, 700n, 997n]
 
         const txWithdrawalFunds = new btc.Transaction()
             .from(operatorUTXOs)
-            .to(myAddress, DUST_AMOUNT)
-            .to(myAddress, DUST_AMOUNT)
-            .to(myAddress, DUST_AMOUNT)
-            .to(myAddress, DUST_AMOUNT)
+            .to(addrOperator, DUST_AMOUNT * 4)
+            .to(addrOperator, DUST_AMOUNT * 4)
+            .to(addrOperator, DUST_AMOUNT * 4)
+            .to(addrOperator, DUST_AMOUNT * 4)
             .change(addrOperator)
             .feePerByte(2)
             .sign(seckeyOperator)
@@ -113,45 +113,60 @@ describe('Test Full E2E Flow', () => {
 
         const withdrawals: any[] = []
         for (let i = 0; i < txWithdrawalFunds.outputs.length - 1; i++) {
+            const ownProofTx = new btc.Transaction()
+            ownProofTx.from({
+                txId: txWithdrawalFunds.id,
+                outputIndex: i,
+                address: addrOperator.toString(),
+                satoshis: txWithdrawalFunds.outputs[i].satoshis,
+                script: new btc.Script(addrOperator),
+            })
+            .to(addrOperator, DUST_AMOUNT)
+            .sign(seckeyOperator)
+
             withdrawals.push(
                 {
                     from: {
-                        txId: txWithdrawalFunds.id,
-                        outputIndex: i,
-                        address: myAddress.toString(),
-                        satoshis: txWithdrawalFunds.outputs[i].satoshis
+                        txId: ownProofTx.id,
+                        outputIndex: 0,
+                        address: addrOperator.toString(),
+                        satoshis: ownProofTx.outputs[0].satoshis,
+                        fullTx: ownProofTx.uncheckedSerialize()
                     },
-                    address: myAddress.toString(),
+                    address: addrOperator.toString(),
                     amount: Number(withdrawalAmounts[i])
                 },
             )
         }
-
-        const withdrawalTxFee = 3000
-
+        
         const withdrawalAggregationRes = await performWithdrawalAggregation(
             operatorUTXOs,
             withdrawals,
-            withdrawalTxFee,
             contracts.withdrawalAggregator.scriptP2TR,
             contracts.withdrawalAggregator.cblock,
             contracts.withdrawalAggregator.script,
             contracts.withdrawalAggregator.tapleaf,
-            seckeyOperator
+            seckeyOperator,
+            2
         )
+        
+        operatorUTXOs = withdrawalAggregationRes.operatorUTXOs
 
         ///////////////////
         // Deploy bridge //
         ///////////////////
-        const deployTxFee = 3000
-
-        const { bridgeData, deployTx } = deployBridge(
+        const deployRes = deployBridge(
             operatorUTXOs,
-            deployTxFee,
             contracts.bridge.scriptP2TR,
             contracts.depositAggregator.scriptP2TR,
             contracts.withdrawalAggregator.scriptP2TR,
+            2
         )
+        
+        let bridgeData = deployRes.bridgeData
+        let deployTx = deployRes.deployTx
+        
+        operatorUTXOs = deployRes.operatorUTXOs
 
         /////////////////////////////////
         // Deposit aggregation result. //
@@ -247,7 +262,7 @@ describe('Test Full E2E Flow', () => {
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), depositAggregationRes.aggregateTxns[1].outputs[0].script, depositAggregationRes.aggregateTxns[2], 1, flags, depositAggregationRes.aggregateTxns[2].inputs[1].witnesses, depositAggregationRes.aggregateTxns[1].outputs[0].satoshis)
         expect(res).to.be.true
-        
+
         res = interpreter.verify(new btc.Script(''), withdrawalAggregationRes.leafTxns[0].outputs[0].script, withdrawalAggregationRes.aggregateTxns[0], 0, flags, withdrawalAggregationRes.aggregateTxns[0].inputs[0].witnesses, withdrawalAggregationRes.leafTxns[0].outputs[0].satoshis)
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), withdrawalAggregationRes.leafTxns[1].outputs[0].script, withdrawalAggregationRes.aggregateTxns[0], 1, flags, withdrawalAggregationRes.aggregateTxns[0].inputs[1].witnesses, withdrawalAggregationRes.leafTxns[1].outputs[0].satoshis)

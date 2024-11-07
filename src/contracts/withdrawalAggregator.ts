@@ -144,11 +144,14 @@ export class WithdrawalAggregator extends SmartContract {
             // Construct ownership proof txids.
             const ownershipProofTxId0 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx0)
             const ownershipProofTxId1 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx1)
+            
+            assert(ownershipProofTxId0 != toByteString('aabbff'))
+            assert(ownershipProofTxId1 != toByteString('aabbff'))
 
             // Check leaves actually unlock passed ownership proof txns.
             // Input structure: ownershipProofTxId + output index (0000000000) + nSequence (ffffffff)
-            assert(ownershipProofTxId0 + toByteString('0000000000ffffffff') == prevTx0.inputFee)
-            assert(ownershipProofTxId1 + toByteString('0000000000ffffffff') == prevTx1.inputFee)
+            assert(ownershipProofTxId0 + toByteString('0000000000ffffffff') == prevTx0.inputContract0)
+            assert(ownershipProofTxId1 + toByteString('0000000000ffffffff') == prevTx1.inputContract0)
 
             // Check withdrawal data addresses are the same as ownership proof txns payed to.
             assert(withdrawalData0.address == ownProofTx0.outputAddrP2WPKH)

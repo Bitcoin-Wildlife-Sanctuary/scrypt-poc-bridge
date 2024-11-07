@@ -2,8 +2,8 @@
 import btc = require('bitcore-lib-inquisition');
 import { AggregationData, WithdrawalAggregator, WithdrawalData } from '../contracts/withdrawalAggregator'
 import { Addr, ByteString, Sha256, toByteString, UTXO } from 'scrypt-ts';
-import { schnorrTrick } from '../utils/txHelper';
-import { myAddress, myPrivateKey } from '../utils/privateKey';
+import { createFundingTx, schnorrTrick } from '../utils/txHelper';
+import { myAddress as operatorAddress, myPrivateKey as operatorPrivKey } from '../utils/privateKey';
 import { buildMerkleTree, MerkleTree } from '../utils/merkleTree';
 import { GeneralUtils } from '../contracts/generalUtils';
 import { MERKLE_PROOF_MAX_DEPTH } from '../contracts/merklePath';
@@ -52,29 +52,15 @@ export function initWithdrawalTree(withdrawalDataList: WithdrawalData[], interme
 export function createLeafWithdrawalTxns(
     nWithdrawals: number,
     withdrawals: WithdrawalData[],
-    fundingUTXOS: UTXO[],
+    proofUTXOs: UTXO[],
+    fundingUTXOs: UTXO[],
     scriptAggregatorP2TR: btc.Script
 ) {
-    const ownProofTxns: btc.Transaction[] = []
     const leafTxns: btc.Transaction[] = []
 
     for (let i = 0; i < nWithdrawals; i++) {
-        const fundingUTXO = fundingUTXOS[i]
-
-        // Create ownership proof txn.
-        const ownProofTx = new btc.Transaction()
-            .from(fundingUTXO)
-            .to(myAddress, 1100)
-
-        ownProofTxns.push(ownProofTx)
-
-        const ownProofUTXO = {
-            address: myAddress.toString(),
-            txId: ownProofTx.id,
-            outputIndex: 0,
-            script: new btc.Script(myAddress),
-            satoshis: ownProofTx.outputs[0].satoshis
-        }
+        const proofUTXO = proofUTXOs[i]
+        const fundingUTXO = fundingUTXOs[i]
 
         const withdrawalData = withdrawals[i]
         const withdrawalDataHash = WithdrawalAggregator.hashWithdrawalData(withdrawalData)
@@ -82,7 +68,7 @@ export function createLeafWithdrawalTxns(
 
         // Construct leaf txn.
         const leafTx = new btc.Transaction()
-            .from(ownProofUTXO)
+            .from([proofUTXO, fundingUTXO])
             .addOutput(new btc.Transaction.Output({
                 satoshis: 546,
                 script: scriptAggregatorP2TR
@@ -91,15 +77,12 @@ export function createLeafWithdrawalTxns(
                 satoshis: 0,
                 script: opRetScript
             }))
-            .sign(myPrivateKey)
+            .sign(operatorPrivKey)
 
         leafTxns.push(leafTx)
     }
 
-    return {
-        ownProofTxns,
-        leafTxns
-    }
+    return leafTxns
 }
 
 export async function mergeWithdrawalLeaves(
@@ -157,7 +140,7 @@ export async function mergeWithdrawalLeaves(
             satoshis: 0,
             script: opRetScript
         }))
-        .sign(myPrivateKey)
+        .sign(operatorPrivKey)
 
     let schnorrTrickDataIn0 = await schnorrTrick(aggregateTx, tapleafAggregator, 0)
     let schnorrTrickDataIn1 = await schnorrTrick(aggregateTx, tapleafAggregator, 1)
@@ -169,8 +152,10 @@ export async function mergeWithdrawalLeaves(
     prevTx0Ver.writeUInt32LE(leafTx0.version)
     let prevTx0Locktime = Buffer.alloc(4)
     prevTx0Locktime.writeUInt32LE(leafTx0.nLockTime)
+    let prevTx0InputContract0 = new btc.encoding.BufferWriter()
+    leafTx0.inputs[0].toBufferWriter(prevTx0InputContract0);
     let prevTx0InputFee = new btc.encoding.BufferWriter()
-    leafTx0.inputs[0].toBufferWriter(prevTx0InputFee);
+    leafTx0.inputs[1].toBufferWriter(prevTx0InputFee);
     let prevTx0ContractAmt = Buffer.alloc(8)
     prevTx0ContractAmt.writeUInt32LE(leafTx0.outputs[0].satoshis)
     let prevTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -180,8 +165,10 @@ export async function mergeWithdrawalLeaves(
     prevTx1Ver.writeUInt32LE(leafTx1.version)
     let prevTx1Locktime = Buffer.alloc(4)
     prevTx1Locktime.writeUInt32LE(leafTx1.nLockTime)
+    let prevTx1InputContract0 = new btc.encoding.BufferWriter()
+    leafTx1.inputs[0].toBufferWriter(prevTx1InputContract0);
     let prevTx1InputFee = new btc.encoding.BufferWriter()
-    leafTx1.inputs[0].toBufferWriter(prevTx1InputFee);
+    leafTx1.inputs[1].toBufferWriter(prevTx1InputFee);
     let prevTx1ContractAmt = Buffer.alloc(8)
     prevTx1ContractAmt.writeUInt32LE(leafTx1.outputs[0].satoshis)
     let prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -193,10 +180,12 @@ export async function mergeWithdrawalLeaves(
     ownProofTx0Locktime.writeUInt32LE(ownProofTx0.nLockTime)
     let ownProofTx0Inputs = new btc.encoding.BufferWriter()
     ownProofTx0Inputs.writeVarintNum(ownProofTx0.inputs.length)
-    ownProofTx0.inputs[0].toBufferWriter(ownProofTx0Inputs);
+    for (const input of ownProofTx0.inputs) {
+        input.toBufferWriter(ownProofTx0Inputs);
+    }
     let ownProofTx0OutputAmt = Buffer.alloc(8)
     ownProofTx0OutputAmt.writeUInt32LE(ownProofTx0.outputs[0].satoshis)
-    let ownProofTx0OutputAddrP2WPKH = myAddress.hashBuffer
+    let ownProofTx0OutputAddrP2WPKH = operatorAddress.hashBuffer
 
     let ownProofTx1Ver = Buffer.alloc(4)
     ownProofTx1Ver.writeUInt32LE(ownProofTx1.version)
@@ -204,10 +193,12 @@ export async function mergeWithdrawalLeaves(
     ownProofTx1Locktime.writeUInt32LE(ownProofTx1.nLockTime)
     let ownProofTx1Inputs = new btc.encoding.BufferWriter()
     ownProofTx1Inputs.writeVarintNum(ownProofTx1.inputs.length)
-    ownProofTx1.inputs[0].toBufferWriter(ownProofTx1Inputs);
+    for (const input of ownProofTx1.inputs) {
+        input.toBufferWriter(ownProofTx1Inputs);
+    }
     let ownProofTx1OutputAmt = Buffer.alloc(8)
     ownProofTx1OutputAmt.writeUInt32LE(ownProofTx1.outputs[0].satoshis)
-    let ownProofTx1OutputAddrP2WPKH = myAddress.hashBuffer
+    let ownProofTx1OutputAddrP2WPKH = operatorAddress.hashBuffer
 
     let fundingPrevout = new btc.encoding.BufferWriter()
     fundingPrevout.writeReverse(aggregateTx.inputs[2].prevTxId);
@@ -242,7 +233,7 @@ export async function mergeWithdrawalLeaves(
         sigOperatorIn0,
 
         prevTx0Ver,
-        Buffer.from('', 'hex'),
+        prevTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx0InputFee.toBuffer(),
         prevTx0ContractAmt,
@@ -251,7 +242,7 @@ export async function mergeWithdrawalLeaves(
         prevTx0Locktime,
 
         prevTx1Ver,
-        Buffer.from('', 'hex'),
+        prevTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx1InputFee.toBuffer(),
         prevTx1ContractAmt,
@@ -352,7 +343,7 @@ export async function mergeWithdrawalLeaves(
         sigOperatorIn1,
 
         prevTx0Ver,
-        Buffer.from('', 'hex'),
+        prevTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx0InputFee.toBuffer(),
         prevTx0ContractAmt,
@@ -361,7 +352,7 @@ export async function mergeWithdrawalLeaves(
         prevTx0Locktime,
 
         prevTx1Ver,
-        Buffer.from('', 'hex'),
+        prevTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx1InputFee.toBuffer(),
         prevTx1ContractAmt,
@@ -503,7 +494,7 @@ export async function mergeAggregateWithdrawalNodes(
             satoshis: 0,
             script: opRetScript
         }))
-        .sign(myPrivateKey)
+        .sign(operatorPrivKey)
 
     let schnorrTrickDataIn0 = await schnorrTrick(aggregateTx2, tapleafAggregator, 0)
     let schnorrTrickDataIn1 = await schnorrTrick(aggregateTx2, tapleafAggregator, 1)
@@ -545,8 +536,10 @@ export async function mergeAggregateWithdrawalNodes(
     ancestorTx0Ver.writeUInt32LE(ancestorTx0.version)
     let ancestorTx0Locktime = Buffer.alloc(4)
     ancestorTx0Locktime.writeUInt32LE(ancestorTx0.nLockTime)
+    let ancestorTx0InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputContract0);
     let ancestorTx0InputFee = new btc.encoding.BufferWriter()
-    ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputFee);
+    ancestorTx0.inputs[1].toBufferWriter(ancestorTx0InputFee);
     let ancestorTx0ContractAmt = Buffer.alloc(8)
     ancestorTx0ContractAmt.writeUInt32LE(ancestorTx0.outputs[0].satoshis)
     let ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -555,8 +548,10 @@ export async function mergeAggregateWithdrawalNodes(
     ancestorTx1Ver.writeUInt32LE(ancestorTx1.version)
     let ancestorTx1Locktime = Buffer.alloc(4)
     ancestorTx1Locktime.writeUInt32LE(ancestorTx1.nLockTime)
+    let ancestorTx1InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputContract0);
     let ancestorTx1InputFee = new btc.encoding.BufferWriter()
-    ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputFee);
+    ancestorTx1.inputs[1].toBufferWriter(ancestorTx1InputFee);
     let ancestorTx1ContractAmt = Buffer.alloc(8)
     ancestorTx1ContractAmt.writeUInt32LE(ancestorTx1.outputs[0].satoshis)
     let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -565,8 +560,10 @@ export async function mergeAggregateWithdrawalNodes(
     ancestorTx2Ver.writeUInt32LE(ancestorTx2.version)
     let ancestorTx2Locktime = Buffer.alloc(4)
     ancestorTx2Locktime.writeUInt32LE(ancestorTx2.nLockTime)
+    let ancestorTx2InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx2.inputs[0].toBufferWriter(ancestorTx2InputContract0);
     let ancestorTx2InputFee = new btc.encoding.BufferWriter()
-    ancestorTx2.inputs[0].toBufferWriter(ancestorTx2InputFee);
+    ancestorTx2.inputs[1].toBufferWriter(ancestorTx2InputFee);
     let ancestorTx2ContractAmt = Buffer.alloc(8)
     ancestorTx2ContractAmt.writeUInt32LE(ancestorTx2.outputs[0].satoshis)
     let ancestorTx2ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -575,8 +572,10 @@ export async function mergeAggregateWithdrawalNodes(
     ancestorTx3Ver.writeUInt32LE(ancestorTx3.version)
     let ancestorTx3Locktime = Buffer.alloc(4)
     ancestorTx3Locktime.writeUInt32LE(ancestorTx3.nLockTime)
+    let ancestorTx3InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx3.inputs[0].toBufferWriter(ancestorTx3InputContract0);
     let ancestorTx3InputFee = new btc.encoding.BufferWriter()
-    ancestorTx3.inputs[0].toBufferWriter(ancestorTx3InputFee);
+    ancestorTx3.inputs[1].toBufferWriter(ancestorTx3InputFee);
     let ancestorTx3ContractAmt = Buffer.alloc(8)
     ancestorTx3ContractAmt.writeUInt32LE(ancestorTx3.outputs[0].satoshis)
     let ancestorTx3ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -633,7 +632,7 @@ export async function mergeAggregateWithdrawalNodes(
         prevTx1Locktime,
 
         ancestorTx0Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx0InputFee.toBuffer(),
         ancestorTx0ContractAmt,
@@ -642,7 +641,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx0Locktime,
 
         ancestorTx1Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx1InputFee.toBuffer(),
         ancestorTx1ContractAmt,
@@ -651,7 +650,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx1Locktime,
 
         ancestorTx2Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx2InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx2InputFee.toBuffer(),
         ancestorTx2ContractAmt,
@@ -660,7 +659,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx2Locktime,
 
         ancestorTx3Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx3InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx3InputFee.toBuffer(),
         ancestorTx3ContractAmt,
@@ -743,7 +742,7 @@ export async function mergeAggregateWithdrawalNodes(
         prevTx1Locktime,
 
         ancestorTx0Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx0InputFee.toBuffer(),
         ancestorTx0ContractAmt,
@@ -752,7 +751,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx0Locktime,
 
         ancestorTx1Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx1InputFee.toBuffer(),
         ancestorTx1ContractAmt,
@@ -761,7 +760,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx1Locktime,
 
         ancestorTx2Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx2InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx2InputFee.toBuffer(),
         ancestorTx2ContractAmt,
@@ -770,7 +769,7 @@ export async function mergeAggregateWithdrawalNodes(
         ancestorTx2Locktime,
 
         ancestorTx3Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx3InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx3InputFee.toBuffer(),
         ancestorTx3ContractAmt,
@@ -820,52 +819,35 @@ export async function mergeAggregateWithdrawalNodes(
 export async function performWithdrawalAggregation(
     operatorUTXOs: UTXO[],
     withdrawals: any[],
-    txFee: number,
     scriptAggregatorP2TR: btc.Script,
     cblockAggregator: string,
     scriptAggregator: btc.Script,
     tapleafAggregator: string,
-    seckeyOperator: btc.PrivateKey
+    seckeyOperator: btc.PrivateKey,
+    feePerByte: number
 ) {
-    const txFunds = new btc.Transaction()
-        .from(operatorUTXOs)
-        .to(myAddress, txFee)
-        .to(myAddress, txFee)
-        .to(myAddress, txFee)
-        .change(myAddress)
-        .feePerByte(2)
-        .sign(myPrivateKey)
-
-    operatorUTXOs.length = 0
-    operatorUTXOs.push(
-        {
-            address: myAddress.toString(),
-            txId: txFunds.id,
-            outputIndex: txFunds.outputs.length - 1,
-            script: new btc.Script(myAddress),
-            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
-        }
-    )
+    const fundingTxns: btc.Transaction[] = []
+    const aggregateTxns: btc.Transaction[] = []
 
     ////////////////////////////////////////////////////////////////////
     //////// Construct 4x leaf withdrawal request transactions. ////////
     ////////////////////////////////////////////////////////////////////
-    const myAddr = toByteString(myAddress.hashBuffer.toString('hex')) as Addr
+    const operatorAddr = toByteString(operatorAddress.hashBuffer.toString('hex')) as Addr
     const withdrawalDataList: WithdrawalData[] = [
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(withdrawals[0].amount)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(withdrawals[1].amount)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(withdrawals[2].amount)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(withdrawals[3].amount)
         },
     ]
@@ -874,10 +856,10 @@ export async function performWithdrawalAggregation(
         withdrawalDataHashList.push(WithdrawalAggregator.hashWithdrawalData(withdrawalData))
     }
 
-    let fundingUTXOs: UTXO[] = []
+    let ownProofUTXOs: UTXO[] = []
     for (let i = 0; i < 4; i++) {
         const utxo = withdrawals[i].from
-        fundingUTXOs.push({
+        ownProofUTXOs.push({
             address: utxo.address,
             txId: utxo.txId,
             outputIndex: utxo.outputIndex,
@@ -888,56 +870,154 @@ export async function performWithdrawalAggregation(
         })
     }
 
-    const { ownProofTxns, leafTxns } = createLeafWithdrawalTxns(
-        4, withdrawalDataList, fundingUTXOs, scriptAggregatorP2TR
+    let ownProofTxns: btc.Transaction[] = []
+    for (let i = 0; i < 4; i++) {
+        ownProofTxns.push(btc.Transaction(withdrawals[i].from.fullTx))
+    }
+
+    let dummyFundingUTXOs: UTXO[] = []
+    for (let i = 0; i < 4; i++) {
+        dummyFundingUTXOs.push({
+            address: operatorAddress.toString(),
+            txId: '00'.repeat(32),
+            outputIndex: 0,
+            script: new btc.Script(operatorAddress),
+            satoshis: btc.Transaction.DUST_AMOUNT
+        })
+    }
+
+    let leafTxns = createLeafWithdrawalTxns(
+        4, withdrawalDataList, ownProofUTXOs, dummyFundingUTXOs, scriptAggregatorP2TR
+    )
+
+    let fundingUTXOs: UTXO[] = []
+    for (let i = 0; i < 4; i++) {
+        let feeAmt = feePerByte * leafTxns[i].vsize
+
+        let fundingRes = createFundingTx(
+            operatorUTXOs,
+            operatorAddress,
+            feeAmt,
+            operatorAddress,
+            feePerByte,
+            operatorPrivKey
+        )
+        operatorUTXOs = [fundingRes.changeUTXO]
+
+        fundingUTXOs.push({
+            address: operatorAddress.toString(),
+            txId: fundingRes.txFunds.id,
+            outputIndex: 0,
+            script: new btc.Script(operatorAddress),
+            satoshis: fundingRes.txFunds.outputs[0].satoshis
+        })
+
+        fundingTxns.push(fundingRes.txFunds)
+    }
+
+    leafTxns = createLeafWithdrawalTxns(
+        4, withdrawalDataList, ownProofUTXOs, fundingUTXOs, scriptAggregatorP2TR
     )
 
     //////////////////////////////////////////
     //////// Merge leaf 0 and leaf 1. ////////
     //////////////////////////////////////////
-    let fundingUTXO = {
-        address: myAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 4,
-        script: new btc.Script(myAddress),
-        satoshis: txFunds.outputs[0].satoshis
+    let dummyFundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: '00'.repeat(32),
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: btc.Transaction.DUST_AMOUNT
     }
 
-    const aggregateTx0 = await mergeWithdrawalLeaves(
+    let aggregateTx = await mergeWithdrawalLeaves(
+        leafTxns[0], leafTxns[1], ownProofTxns[0], ownProofTxns[1],
+        dummyFundingUTXO, withdrawalDataList[0], withdrawalDataList[1],
+        withdrawalDataHashList[0], withdrawalDataHashList[1],
+        scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    let feeAmt = feePerByte * aggregateTx.vsize
+
+    let fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeWithdrawalLeaves(
         leafTxns[0], leafTxns[1], ownProofTxns[0], ownProofTxns[1],
         fundingUTXO, withdrawalDataList[0], withdrawalDataList[1],
         withdrawalDataHashList[0], withdrawalDataHashList[1],
         scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     //////////////////////////////////////////
     //////// Merge leaf 2 and leaf 3. ////////
     //////////////////////////////////////////
-    fundingUTXO = {
-        address: myAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 5,
-        script: new btc.Script(myAddress),
-        satoshis: txFunds.outputs[1].satoshis
+    dummyFundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: '00'.repeat(32),
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: btc.Transaction.DUST_AMOUNT
     }
 
-    const aggregateTx1 = await mergeWithdrawalLeaves(
+    aggregateTx = await mergeWithdrawalLeaves(
+        leafTxns[2], leafTxns[3], ownProofTxns[2], ownProofTxns[3],
+        dummyFundingUTXO, withdrawalDataList[2], withdrawalDataList[3],
+        withdrawalDataHashList[2], withdrawalDataHashList[3],
+        scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    feeAmt = feePerByte * aggregateTx.vsize
+
+    fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeWithdrawalLeaves(
         leafTxns[2], leafTxns[3], ownProofTxns[2], ownProofTxns[3],
         fundingUTXO, withdrawalDataList[2], withdrawalDataList[3],
         withdrawalDataHashList[2], withdrawalDataHashList[3],
         scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     ////////////////////////////////////////////
     //////// Merge two aggregate nodes. ////////
     ////////////////////////////////////////////
-    fundingUTXO = {
-        address: myAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 6,
-        script: new btc.Script(myAddress),
-        satoshis: txFunds.outputs[2].satoshis
-    }
 
     let aggregationData0: AggregationData = {
         prevH0: withdrawalDataHashList[0],
@@ -951,8 +1031,43 @@ export async function performWithdrawalAggregation(
         sumAmt: withdrawals[2].amount + withdrawals[3].amount
     }
 
-    const aggregateTx2 = await mergeAggregateWithdrawalNodes(
-        aggregateTx0, aggregateTx1, leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
+    dummyFundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: '00'.repeat(32),
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: btc.Transaction.DUST_AMOUNT
+    }
+
+    aggregateTx = await mergeAggregateWithdrawalNodes(
+        aggregateTxns[0], aggregateTxns[1], leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
+        aggregationData0, aggregationData1,
+        withdrawalDataHashList[0], withdrawalDataHashList[1], withdrawalDataHashList[2], withdrawalDataHashList[3],
+        dummyFundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    feeAmt = feePerByte * aggregateTx.vsize
+
+    fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeAggregateWithdrawalNodes(
+        aggregateTxns[0], aggregateTxns[1], leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
         aggregationData0, aggregationData1,
         withdrawalDataHashList[0], withdrawalDataHashList[1], withdrawalDataHashList[2], withdrawalDataHashList[3],
         fundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
@@ -963,18 +1078,18 @@ export async function performWithdrawalAggregation(
         withdrawalDataList, intermediateSums
     )
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     return {
         withdrawalDataList,
         withdrawalDataHashList,
         withdrawalTree,
         intermediateSums,
-        txFunds,
+        fundingTxns,
         leafTxns,
-        aggregateTxns: [
-            aggregateTx0,
-            aggregateTx1,
-            aggregateTx2
-        ]
+        aggregateTxns,
+        operatorUTXOs
     }
 
 }

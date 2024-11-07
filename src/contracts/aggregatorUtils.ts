@@ -15,9 +15,9 @@ export type AggregatorTransaction = {
 export class AggregatorUtils extends SmartContractLib {
 
     @method()
-    static getTxId(tx: AggregatorTransaction, isPrevTxLeaf: boolean): Sha256 {
-        const inputsPrefix = isPrevTxLeaf ?
-            toByteString('01') :
+    static getTxId(tx: AggregatorTransaction, isLeaf: boolean): Sha256 {
+        const inputsPrefix = isLeaf ?
+            toByteString('02') + tx.inputContract0 :
             (toByteString('03') + tx.inputContract0 + tx.inputContract1)
         return hash256(
             tx.ver +

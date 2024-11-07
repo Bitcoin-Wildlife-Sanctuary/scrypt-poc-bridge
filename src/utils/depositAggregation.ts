@@ -3,7 +3,7 @@ import btc = require('bitcore-lib-inquisition');
 
 import { DepositAggregator, DepositData } from '../contracts/depositAggregator'
 import { Addr, hash256, Sha256, toByteString, UTXO } from 'scrypt-ts';
-import { schnorrTrick } from '../utils/txHelper';
+import { createFundingTx, schnorrTrick } from '../utils/txHelper';
 import { myAddress as operatorAddress, myPrivateKey as operatorPrivKey } from '../utils/privateKey';
 import { buildMerkleTree, MerkleTree } from '../utils/merkleTree';
 
@@ -21,14 +21,18 @@ export function initDepositsTree(depositDataList: DepositData[]): MerkleTree {
 export function createLeafDepositTxns(
     nDeposits: number,
     deposits: DepositData[],
-    fundingUTXOS: UTXO[],
+    depositUTXOs: UTXO[],
+    fungingUTXOs: UTXO[],
     scriptAggregatorP2TR: btc.Script
 ): btc.Transaction[] {
     const leafTxns: btc.Transaction[] = []
 
     for (let i = 0; i < nDeposits; i++) {
-        // UTXO where our leaf tx gets the needed funds from.
-        const fundingUTXO = fundingUTXOS[i]
+        // UTXO where the funds to deposit come from.
+        const depositUTXO = depositUTXOs[i]
+
+        // UTXO with funds to pay fees.
+        const fundingUTXO = fungingUTXOs[i]
 
         // Deposit information.
         const depositData = deposits[i]
@@ -37,7 +41,7 @@ export function createLeafDepositTxns(
 
         // Construct leaf txn.
         const leafTx = new btc.Transaction()
-            .from(fundingUTXO)
+            .from([depositUTXO, fundingUTXO])
             .addOutput(new btc.Transaction.Output({
                 satoshis: Number(depositData.amount),
                 script: scriptAggregatorP2TR
@@ -46,7 +50,7 @@ export function createLeafDepositTxns(
                 satoshis: 0,
                 script: opRetScript
             }))
-            .sign(operatorPrivKey)
+            .sign(operatorPrivKey) // TODO: sign with user key
 
         leafTxns.push(leafTx)
     }
@@ -114,8 +118,10 @@ export async function mergeDepositLeaves(
     prevTx0Ver.writeUInt32LE(leafTx0.version)
     let prevTx0Locktime = Buffer.alloc(4)
     prevTx0Locktime.writeUInt32LE(leafTx0.nLockTime)
+    let prevTx0InputContract0 = new btc.encoding.BufferWriter()
+    leafTx0.inputs[0].toBufferWriter(prevTx0InputContract0);
     let prevTx0InputFee = new btc.encoding.BufferWriter()
-    leafTx0.inputs[0].toBufferWriter(prevTx0InputFee);
+    leafTx0.inputs[1].toBufferWriter(prevTx0InputFee);
     let prevTx0ContractAmt = Buffer.alloc(8)
     prevTx0ContractAmt.writeUInt32LE(leafTx0.outputs[0].satoshis)
     let prevTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -125,8 +131,10 @@ export async function mergeDepositLeaves(
     prevTx1Ver.writeUInt32LE(leafTx1.version)
     let prevTx1Locktime = Buffer.alloc(4)
     prevTx1Locktime.writeUInt32LE(leafTx1.nLockTime)
+    let prevTx1InputContract0 = new btc.encoding.BufferWriter()
+    leafTx1.inputs[0].toBufferWriter(prevTx1InputContract0);
     let prevTx1InputFee = new btc.encoding.BufferWriter()
-    leafTx1.inputs[0].toBufferWriter(prevTx1InputFee);
+    leafTx1.inputs[1].toBufferWriter(prevTx1InputFee);
     let prevTx1ContractAmt = Buffer.alloc(8)
     prevTx1ContractAmt.writeUInt32LE(leafTx1.outputs[0].satoshis)
     let prevTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -165,7 +173,7 @@ export async function mergeDepositLeaves(
         sigOperatorIn0,
 
         prevTx0Ver,
-        Buffer.from('', 'hex'),
+        prevTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx0InputFee.toBuffer(),
         prevTx0ContractAmt,
@@ -174,7 +182,7 @@ export async function mergeDepositLeaves(
         prevTx0Locktime,
 
         prevTx1Ver,
-        Buffer.from('', 'hex'),
+        prevTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx1InputFee.toBuffer(),
         prevTx1ContractAmt,
@@ -256,7 +264,7 @@ export async function mergeDepositLeaves(
         sigOperatorIn1,
 
         prevTx0Ver,
-        Buffer.from('', 'hex'),
+        prevTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx0InputFee.toBuffer(),
         prevTx0ContractAmt,
@@ -265,7 +273,7 @@ export async function mergeDepositLeaves(
         prevTx0Locktime,
 
         prevTx1Ver,
-        Buffer.from('', 'hex'),
+        prevTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         prevTx1InputFee.toBuffer(),
         prevTx1ContractAmt,
@@ -424,8 +432,10 @@ export async function mergeAggregateDepositNodes(
     ancestorTx0Ver.writeUInt32LE(ancestorTx0.version)
     let ancestorTx0Locktime = Buffer.alloc(4)
     ancestorTx0Locktime.writeUInt32LE(ancestorTx0.nLockTime)
+    let ancestorTx0InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputContract0);
     let ancestorTx0InputFee = new btc.encoding.BufferWriter()
-    ancestorTx0.inputs[0].toBufferWriter(ancestorTx0InputFee);
+    ancestorTx0.inputs[1].toBufferWriter(ancestorTx0InputFee);
     let ancestorTx0ContractAmt = Buffer.alloc(8)
     ancestorTx0ContractAmt.writeUInt32LE(ancestorTx0.outputs[0].satoshis)
     let ancestorTx0ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -434,8 +444,10 @@ export async function mergeAggregateDepositNodes(
     ancestorTx1Ver.writeUInt32LE(ancestorTx1.version)
     let ancestorTx1Locktime = Buffer.alloc(4)
     ancestorTx1Locktime.writeUInt32LE(ancestorTx1.nLockTime)
+    let ancestorTx1InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputContract0);
     let ancestorTx1InputFee = new btc.encoding.BufferWriter()
-    ancestorTx1.inputs[0].toBufferWriter(ancestorTx1InputFee);
+    ancestorTx1.inputs[1].toBufferWriter(ancestorTx1InputFee);
     let ancestorTx1ContractAmt = Buffer.alloc(8)
     ancestorTx1ContractAmt.writeUInt32LE(ancestorTx1.outputs[0].satoshis)
     let ancestorTx1ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -444,8 +456,10 @@ export async function mergeAggregateDepositNodes(
     ancestorTx2Ver.writeUInt32LE(ancestorTx2.version)
     let ancestorTx2Locktime = Buffer.alloc(4)
     ancestorTx2Locktime.writeUInt32LE(ancestorTx2.nLockTime)
+    let ancestorTx2InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx2.inputs[0].toBufferWriter(ancestorTx2InputContract0);
     let ancestorTx2InputFee = new btc.encoding.BufferWriter()
-    ancestorTx2.inputs[0].toBufferWriter(ancestorTx2InputFee);
+    ancestorTx2.inputs[1].toBufferWriter(ancestorTx2InputFee);
     let ancestorTx2ContractAmt = Buffer.alloc(8)
     ancestorTx2ContractAmt.writeUInt32LE(ancestorTx2.outputs[0].satoshis)
     let ancestorTx2ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -454,8 +468,10 @@ export async function mergeAggregateDepositNodes(
     ancestorTx3Ver.writeUInt32LE(ancestorTx3.version)
     let ancestorTx3Locktime = Buffer.alloc(4)
     ancestorTx3Locktime.writeUInt32LE(ancestorTx3.nLockTime)
+    let ancestorTx3InputContract0 = new btc.encoding.BufferWriter()
+    ancestorTx3.inputs[0].toBufferWriter(ancestorTx3InputContract0);
     let ancestorTx3InputFee = new btc.encoding.BufferWriter()
-    ancestorTx3.inputs[0].toBufferWriter(ancestorTx3InputFee);
+    ancestorTx3.inputs[1].toBufferWriter(ancestorTx3InputFee);
     let ancestorTx3ContractAmt = Buffer.alloc(8)
     ancestorTx3ContractAmt.writeUInt32LE(ancestorTx3.outputs[0].satoshis)
     let ancestorTx3ContractSPK = Buffer.concat([Buffer.from('22', 'hex'), scriptAggregatorP2TR.toBuffer()])
@@ -508,7 +524,7 @@ export async function mergeAggregateDepositNodes(
         prevTx1Locktime,
 
         ancestorTx0Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx0InputFee.toBuffer(),
         ancestorTx0ContractAmt,
@@ -517,7 +533,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx0Locktime,
 
         ancestorTx1Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx1InputFee.toBuffer(),
         ancestorTx1ContractAmt,
@@ -526,7 +542,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx1Locktime,
 
         ancestorTx2Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx2InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx2InputFee.toBuffer(),
         ancestorTx2ContractAmt,
@@ -535,7 +551,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx2Locktime,
 
         ancestorTx3Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx3InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx3InputFee.toBuffer(),
         ancestorTx3ContractAmt,
@@ -599,7 +615,7 @@ export async function mergeAggregateDepositNodes(
         prevTx1Locktime,
 
         ancestorTx0Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx0InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx0InputFee.toBuffer(),
         ancestorTx0ContractAmt,
@@ -608,7 +624,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx0Locktime,
 
         ancestorTx1Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx1InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx1InputFee.toBuffer(),
         ancestorTx1ContractAmt,
@@ -617,7 +633,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx1Locktime,
 
         ancestorTx2Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx2InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx2InputFee.toBuffer(),
         ancestorTx2ContractAmt,
@@ -626,7 +642,7 @@ export async function mergeAggregateDepositNodes(
         ancestorTx2Locktime,
 
         ancestorTx3Ver,
-        Buffer.from('', 'hex'),
+        ancestorTx3InputContract0.toBuffer(),
         Buffer.from('', 'hex'),
         ancestorTx3InputFee.toBuffer(),
         ancestorTx3ContractAmt,
@@ -657,52 +673,35 @@ export async function mergeAggregateDepositNodes(
 export async function performDepositAggregation(
     operatorUTXOs: UTXO[],
     deposits: any[],
-    txFee: number,
     scriptAggregatorP2TR: btc.Script,
     cblockAggregator: string,
     scriptAggregator: btc.Script,
     tapleafAggregator: string,
-    seckeyOperator: btc.PrivateKey
+    seckeyOperator: btc.PrivateKey,
+    feePerByte: number
 ) {
-    const txFunds = new btc.Transaction()
-        .from(operatorUTXOs)
-        .to(operatorAddress, txFee)
-        .to(operatorAddress, txFee)
-        .to(operatorAddress, txFee)
-        .change(operatorAddress)
-        .feePerByte(2)
-        .sign(operatorPrivKey)
-
-    operatorUTXOs.length = 0
-    operatorUTXOs.push(
-        {
-            address: operatorAddress.toString(),
-            txId: txFunds.id,
-            outputIndex: txFunds.outputs.length - 1,
-            script: new btc.Script(operatorAddress),
-            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
-        }
-    )
+    const fundingTxns: btc.Transaction[] = []
+    const aggregateTxns: btc.Transaction[] = []
 
     /////////////////////////////////////////////////////////
     //////// Construct 4x leaf deposit transactions. ////////
     /////////////////////////////////////////////////////////
-    const myAddr = toByteString(operatorAddress.hashBuffer.toString('hex')) as Addr
+    const operatorAddr = toByteString(operatorAddress.hashBuffer.toString('hex')) as Addr
     const depositDataList: DepositData[] = [
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(deposits[0].from.satoshis)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(deposits[1].from.satoshis)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(deposits[2].from.satoshis)
         },
         {
-            address: myAddr,
+            address: operatorAddr,
             amount: BigInt(deposits[3].from.satoshis)
         },
     ]
@@ -711,10 +710,10 @@ export async function performDepositAggregation(
         depositDataHashList.push(DepositAggregator.hashDepositData(depositData))
     }
 
-    let fundingUTXOs: UTXO[] = []
+    let depositUTXOs: UTXO[] = []
     for (let i = 0; i < 4; i++) {
         const utxo = deposits[i].from
-        fundingUTXOs.push({
+        depositUTXOs.push({
             address: utxo.address,
             txId: utxo.txId,
             outputIndex: utxo.outputIndex,
@@ -725,73 +724,197 @@ export async function performDepositAggregation(
         })
     }
 
-    const leafTxns: btc.Transaction[] = createLeafDepositTxns(
-        4, depositDataList, fundingUTXOs, scriptAggregatorP2TR
+    let dummyFundingUTXOs: UTXO[] = []
+    for (let i = 0; i < 4; i++) {
+        dummyFundingUTXOs.push({
+            address: operatorAddress.toString(),
+            txId: '00'.repeat(32),
+            outputIndex: 0,
+            script: new btc.Script(operatorAddress),
+            satoshis: btc.Transaction.DUST_AMOUNT
+        })
+    }
+
+    let leafTxns: btc.Transaction[] = createLeafDepositTxns(
+        4, depositDataList, depositUTXOs, dummyFundingUTXOs, scriptAggregatorP2TR
+    )
+
+    let fundingUTXOs: UTXO[] = []
+    for (let i = 0; i < 4; i++) {
+        let feeAmt = feePerByte * leafTxns[i].vsize
+
+        let fundingRes = createFundingTx(
+            operatorUTXOs,
+            operatorAddress,
+            feeAmt,
+            operatorAddress,
+            feePerByte,
+            operatorPrivKey
+        )
+        operatorUTXOs = [fundingRes.changeUTXO]
+
+        fundingUTXOs.push({
+            address: operatorAddress.toString(),
+            txId: fundingRes.txFunds.id,
+            outputIndex: 0,
+            script: new btc.Script(operatorAddress),
+            satoshis: fundingRes.txFunds.outputs[0].satoshis
+        })
+
+        fundingTxns.push(fundingRes.txFunds)
+    }
+
+    leafTxns = createLeafDepositTxns(
+        4, depositDataList, depositUTXOs, fundingUTXOs, scriptAggregatorP2TR
     )
 
     //////////////////////////////////////////
     //////// Merge leaf 0 and leaf 1. ////////
     //////////////////////////////////////////
-    let fundingUTXO = {
+    let dummyFundingUTXO = {
         address: operatorAddress.toString(),
-        txId: txFunds.id,
+        txId: '00'.repeat(32),
         outputIndex: 0,
         script: new btc.Script(operatorAddress),
-        satoshis: txFunds.outputs[0].satoshis
+        satoshis: btc.Transaction.DUST_AMOUNT
     }
 
-    const aggregateTx0 = await mergeDepositLeaves(
+    let aggregateTx = await mergeDepositLeaves(
+        leafTxns[0], leafTxns[1], dummyFundingUTXO,
+        depositDataList[0], depositDataList[1], depositDataHashList[0], depositDataHashList[1],
+        scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    let feeAmt = feePerByte * aggregateTx.vsize
+
+    let fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeDepositLeaves(
         leafTxns[0], leafTxns[1], fundingUTXO,
         depositDataList[0], depositDataList[1], depositDataHashList[0], depositDataHashList[1],
         scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     //////////////////////////////////////////
     //////// Merge leaf 2 and leaf 3. ////////
     //////////////////////////////////////////
-    fundingUTXO = {
+    dummyFundingUTXO = {
         address: operatorAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 1,
+        txId: '00'.repeat(32),
+        outputIndex: 0,
         script: new btc.Script(operatorAddress),
-        satoshis: txFunds.outputs[1].satoshis
+        satoshis: btc.Transaction.DUST_AMOUNT
     }
 
-    const aggregateTx1 = await mergeDepositLeaves(
+    aggregateTx = await mergeDepositLeaves(
+        leafTxns[2], leafTxns[3], dummyFundingUTXO,
+        depositDataList[2], depositDataList[3], depositDataHashList[2], depositDataHashList[3],
+        scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    feeAmt = feePerByte * aggregateTx.vsize
+
+    fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeDepositLeaves(
         leafTxns[2], leafTxns[3], fundingUTXO,
         depositDataList[2], depositDataList[3], depositDataHashList[2], depositDataHashList[3],
         scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     ////////////////////////////////////////////
     //////// Merge two aggregate nodes. ////////
     ////////////////////////////////////////////
-    fundingUTXO = {
+    dummyFundingUTXO = {
         address: operatorAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 2,
+        txId: '00'.repeat(32),
+        outputIndex: 0,
         script: new btc.Script(operatorAddress),
-        satoshis: txFunds.outputs[2].satoshis
+        satoshis: btc.Transaction.DUST_AMOUNT
     }
 
-    const aggregateTx2 = await mergeAggregateDepositNodes(
-        aggregateTx0, aggregateTx1, leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
+    aggregateTx = await mergeAggregateDepositNodes(
+        aggregateTxns[0], aggregateTxns[1], leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
+        depositDataHashList[0], depositDataHashList[1], depositDataHashList[2], depositDataHashList[3],
+        dummyFundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
+    )
+
+    feeAmt = feePerByte * aggregateTx.vsize
+
+    fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
+    }
+
+    aggregateTx = await mergeAggregateDepositNodes(
+        aggregateTxns[0], aggregateTxns[1], leafTxns[0], leafTxns[1], leafTxns[2], leafTxns[3],
         depositDataHashList[0], depositDataHashList[1], depositDataHashList[2], depositDataHashList[3],
         fundingUTXO, scriptAggregatorP2TR, tapleafAggregator, scriptAggregator, cblockAggregator, seckeyOperator
     )
 
     const depositTree = initDepositsTree(depositDataList)
 
+    aggregateTxns.push(aggregateTx)
+    fundingTxns.push(fundingRes.txFunds)
+
     return {
         depositDataList,
         depositDataHashList,
         depositTree,
-        txFunds,
+        fundingTxns,
         leafTxns,
-        aggregateTxns: [
-            aggregateTx0,
-            aggregateTx1,
-            aggregateTx2
-        ]
+        aggregateTxns,
+        operatorUTXOs
     }
 }

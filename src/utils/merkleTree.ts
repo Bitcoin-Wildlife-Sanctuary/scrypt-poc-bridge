@@ -4,8 +4,8 @@ import { MerkleProof, Node, NodePos, MERKLE_PROOF_MAX_DEPTH } from '../../src/co
 export class MerkleTree {
     levels: Sha256[][];
 
-    constructor() {
-        this.levels = [];
+    constructor(levels: Sha256[][] = []) {
+        this.levels = levels;
     }
 
     // Add a level to the tree

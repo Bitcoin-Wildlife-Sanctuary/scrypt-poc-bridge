@@ -6,7 +6,7 @@ import * as ecurve from 'ecurve';
 import { sha256 } from 'js-sha256';
 // @ts-ignore
 import BigInteger = require('bigi')
-import { DummyProvider, DefaultProvider, TestWallet, bsv, PubKey, toByteString } from 'scrypt-ts'
+import { DummyProvider, DefaultProvider, TestWallet, bsv, PubKey, toByteString, UTXO } from 'scrypt-ts'
 import { myPrivateKey } from './privateKey'
 
 import * as dotenv from 'dotenv'
@@ -329,5 +329,34 @@ export function createContractInstances(
             tpubkey: tpubkeyExpander,
             cblock: cblockExpander
         }
+    }
+}
+
+export function createFundingTx(
+    utxos: UTXO[],
+    address: btc.Address,
+    amount: number,
+    changeAddress: btc.Address,
+    feePerByte: number,
+    privateKey: btc.PrivateKey
+) {
+    const txFunds = new btc.Transaction()
+        .from(utxos)
+        .to(address, amount)
+        .change(changeAddress)
+        .feePerByte(feePerByte)
+        .sign(privateKey)
+
+    const changeUTXO: UTXO = {
+        address: changeAddress.toString(),
+        txId: txFunds.id,
+        outputIndex: txFunds.outputs.length - 1,
+        script: new btc.Script(changeAddress),
+        satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+    }
+
+    return {
+        txFunds,
+        changeUTXO
     }
 }

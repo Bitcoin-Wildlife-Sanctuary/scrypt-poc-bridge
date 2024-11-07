@@ -15,6 +15,13 @@ You may obtain signet funds via these faucets:
 - https://alt.signetfaucet.com
 - https://x.com/babylon_chain/status/1790787732643643575
 
+
+## Install Dependencies
+
+```sh
+npm i
+```
+
 ## Build
 
 ```sh
@@ -24,7 +31,7 @@ npm run build
 ## Testing Locally
 
 ```sh
-npm run test
+npm t
 ```
 
 ## Testing on Signet

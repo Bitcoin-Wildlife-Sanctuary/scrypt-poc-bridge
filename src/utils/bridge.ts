@@ -3,7 +3,7 @@ import btc = require('bitcore-lib-inquisition');
 import { DepositData } from '../contracts/depositAggregator'
 import { AccountData, Bridge, MAX_NODES_AGGREGATED } from '../contracts/bridge'
 import { ByteString, toByteString, UTXO } from 'scrypt-ts';
-import { schnorrTrick } from '../utils/txHelper';
+import { createFundingTx, schnorrTrick } from '../utils/txHelper';
 import { myPrivateKey } from '../utils/privateKey';
 import { WithdrawalData } from '../contracts/withdrawalAggregator';
 import { MERKLE_PROOF_MAX_DEPTH, MerkleProof, NodePos } from '../contracts/merklePath';
@@ -26,10 +26,10 @@ export function initAccountsTree(accountsData: AccountData[]): MerkleTree {
 
 export function deployBridge(
     operatorUTXOs: UTXO[],
-    txFee: number,
     scriptBridgeP2TR: btc.Script,
     scriptDepositAggregatorP2TR: btc.Script,
     scriptWithdrawalAggregatorP2TR: btc.Script,
+    feePerByte: number
 ) {
     // Create ampty accounts tree.
     const numAccounts = Math.pow(2, MERKLE_PROOF_MAX_DEPTH);
@@ -41,26 +41,6 @@ export function deployBridge(
     )
     let accountsTree = initAccountsTree(accounts)
 
-    const txFunds = new btc.Transaction()
-        .from(
-            operatorUTXOs
-        )
-        .to(operatorAddress, txFee)
-        .change(operatorAddress)
-        .feePerByte(2)
-        .sign(operatorPrivKey)
-
-    operatorUTXOs.length = 0
-    operatorUTXOs.push(
-        {
-            address: operatorAddress.toString(),
-            txId: txFunds.id,
-            outputIndex: txFunds.outputs.length - 1,
-            script: new btc.Script(operatorAddress),
-            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
-        }
-    )
-
     let stateHash = Bridge.getStateHash(
         accountsTree.getRoot(),
         toByteString('22' + scriptDepositAggregatorP2TR.toHex()),
@@ -69,15 +49,47 @@ export function deployBridge(
     )
     let opRetScript = new btc.Script(`6a20${stateHash}`)
 
-    let fundingUTXO: UTXO = {
+    let dummyFundingUTXO = {
         address: operatorAddress.toString(),
-        txId: txFunds.id,
+        txId: '00'.repeat(32),
         outputIndex: 0,
         script: new btc.Script(operatorAddress),
-        satoshis: txFunds.outputs[0].satoshis
+        satoshis: btc.Transaction.DUST_AMOUNT
+    }
+    
+    let deployTx = new btc.Transaction()
+        .from(dummyFundingUTXO)
+        .addOutput(new btc.Transaction.Output({
+            satoshis: 546,
+            script: scriptBridgeP2TR
+        }))
+        .addOutput(new btc.Transaction.Output({
+            satoshis: 0,
+            script: opRetScript
+        }))
+        .sign(operatorPrivKey)
+
+    let feeAmt = feePerByte * deployTx.vsize
+
+    let fundingRes = createFundingTx(
+        operatorUTXOs,
+        operatorAddress,
+        feeAmt,
+        operatorAddress,
+        feePerByte,
+        operatorPrivKey
+    )
+    operatorUTXOs = [fundingRes.changeUTXO]
+
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: fundingRes.txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: fundingRes.txFunds.outputs[0].satoshis
     }
 
-    const deployTx = new btc.Transaction()
+    deployTx = new btc.Transaction()
         .from(fundingUTXO)
         .addOutput(new btc.Transaction.Output({
             satoshis: 546,
@@ -94,7 +106,9 @@ export function deployBridge(
             accounts,
             accountsTree,
         },
-        deployTx
+        deployTx,
+        fundingTx: fundingRes.txFunds,
+        operatorUTXOs
     }
 }
 
@@ -214,70 +228,28 @@ function prepareMerkleProofsWitnessArray(proofs: MerkleProof[]): Buffer[] {
     return res
 }
 
-export async function performBridgeDeposit(
-    operatorUTXOs: UTXO[],
-    txFee: number,
+async function createBridgeDepositTx(
     prevBridgeTx: btc.Transaction,
-    depositAggregationRes: any,
+    prevTxExpanderRoot: Buffer,
+    prevTxExpanderAmt: Buffer,
     accounts: AccountData[],
     accountsTree: MerkleTree,
-
-    scriptBridgeP2TR: btc.Script,
+    depositAggregationRes,
+    bridgeUTXO: UTXO,
+    depositAggregationUTXO: UTXO,
+    fundingUTXO: UTXO,
     scriptDepositAggregatorP2TR: btc.Script,
     scriptWithdrawalAggregatorP2TR: btc.Script,
+    scriptBridgeP2TR: btc.Script,
     scriptExpanderP2TR: btc.Script,
-    tapleafBridge: string,
-    tapleafDepositAggregator: string,
-    seckeyOperator: btc.PrivateKey,
     scriptBridge: btc.Script,
-    cblockBridge: string,
     scriptDepositAggregator: btc.Script,
+    tapleafDepositAggregator: string,
+    tapleafBridge: string,
+    cblockBridge: string,
     cblockDepositAggregator: string,
-
-    prevTxExpanderRoot = Buffer.from('', 'hex'),
-    prevTxExpanderAmt = Buffer.from('', 'hex'),
-) {
-    const txFunds = new btc.Transaction()
-        .from(
-            operatorUTXOs
-        )
-        .to(operatorAddress, txFee)
-        .change(operatorAddress)
-        .feePerByte(2)
-        .sign(operatorPrivKey)
-
-    operatorUTXOs.length = 0
-    operatorUTXOs.push(
-        {
-            address: operatorAddress.toString(),
-            txId: txFunds.id,
-            outputIndex: txFunds.outputs.length - 1,
-            script: new btc.Script(operatorAddress),
-            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
-        }
-    )
-
-    let fundingUTXO = {
-        address: operatorAddress.toString(),
-        txId: txFunds.id,
-        outputIndex: 0,
-        script: new btc.Script(operatorAddress),
-        satoshis: txFunds.outputs[0].satoshis
-    }
-
-    let bridgeUTXO = {
-        txId: prevBridgeTx.id,
-        outputIndex: 0,
-        script: scriptBridgeP2TR,
-        satoshis: prevBridgeTx.outputs[0].satoshis
-    }
-    let depositAggregationUTXO = {
-        txId: depositAggregationRes.aggregateTxns[2].id,
-        outputIndex: 0,
-        script: scriptDepositAggregatorP2TR,
-        satoshis: depositAggregationRes.aggregateTxns[2].outputs[0].satoshis
-    }
-
+    seckeyOperator: btc.PrivateKey,
+) { 
     // Update accounts root with all deposits.
     // Also get all releavant proofs.
     let accountsCurrent = Array.from(accounts)
@@ -518,12 +490,104 @@ export async function performBridgeDeposit(
     ]
 
     bridgeTx.inputs[1].witnesses = witnessesIn1
-
+    
     return {
         bridgeTx,
         accounts,
         accountsTree
     }
+}
+
+export async function performBridgeDeposit(
+    operatorUTXOs: UTXO[],
+    txFee: number,
+    prevBridgeTx: btc.Transaction,
+    depositAggregationRes: any,
+    accounts: AccountData[],
+    accountsTree: MerkleTree,
+
+    scriptBridgeP2TR: btc.Script,
+    scriptDepositAggregatorP2TR: btc.Script,
+    scriptWithdrawalAggregatorP2TR: btc.Script,
+    scriptExpanderP2TR: btc.Script,
+    tapleafBridge: string,
+    tapleafDepositAggregator: string,
+    seckeyOperator: btc.PrivateKey,
+    scriptBridge: btc.Script,
+    cblockBridge: string,
+    scriptDepositAggregator: btc.Script,
+    cblockDepositAggregator: string,
+
+    prevTxExpanderRoot = Buffer.from('', 'hex'),
+    prevTxExpanderAmt = Buffer.from('', 'hex'),
+) {
+    const txFunds = new btc.Transaction()
+        .from(
+            operatorUTXOs
+        )
+        .to(operatorAddress, txFee)
+        .change(operatorAddress)
+        .feePerByte(2)
+        .sign(operatorPrivKey)
+
+    operatorUTXOs.length = 0
+    operatorUTXOs.push(
+        {
+            address: operatorAddress.toString(),
+            txId: txFunds.id,
+            outputIndex: txFunds.outputs.length - 1,
+            script: new btc.Script(operatorAddress),
+            satoshis: txFunds.outputs[txFunds.outputs.length - 1].satoshis
+        }
+    )
+
+    let fundingUTXO = {
+        address: operatorAddress.toString(),
+        txId: txFunds.id,
+        outputIndex: 0,
+        script: new btc.Script(operatorAddress),
+        satoshis: txFunds.outputs[0].satoshis
+    }
+
+    let bridgeUTXO = {
+        txId: prevBridgeTx.id,
+        outputIndex: 0,
+        script: scriptBridgeP2TR,
+        satoshis: prevBridgeTx.outputs[0].satoshis
+    }
+    let depositAggregationUTXO = {
+        txId: depositAggregationRes.aggregateTxns[2].id,
+        outputIndex: 0,
+        script: scriptDepositAggregatorP2TR,
+        satoshis: depositAggregationRes.aggregateTxns[2].outputs[0].satoshis
+    }
+    
+
+    const bridgeDepositTxRes = await createBridgeDepositTx(
+        prevBridgeTx,
+        prevTxExpanderRoot,
+        prevTxExpanderAmt,
+        accounts,
+        accountsTree,
+        depositAggregationRes,
+        bridgeUTXO,
+        depositAggregationUTXO,
+        fundingUTXO,
+        scriptDepositAggregatorP2TR,
+        scriptWithdrawalAggregatorP2TR,
+        scriptBridgeP2TR,
+        scriptExpanderP2TR,
+        scriptBridge,
+        scriptDepositAggregator,
+        tapleafDepositAggregator,
+        tapleafBridge,
+        cblockBridge,
+        cblockDepositAggregator,
+        seckeyOperator
+    )
+    
+
+    return bridgeDepositTxRes
 }
 
 export async function performBridgeWithdrawal(
@@ -618,7 +682,7 @@ export async function performBridgeWithdrawal(
 
         accountsTree.updateLeaf(i, Bridge.hashAccountData(accounts[i]))
 
-        totalAmtWithdrawn += withdrawal.amount
+        totalAmtWithdrawn += BigInt(withdrawal.amount)
     }
 
     let expanderRoot = withdrawalAggregationRes.withdrawalTree.getRoot()
@@ -630,7 +694,7 @@ export async function performBridgeWithdrawal(
         toByteString(expanderRoot)
     )
     let opRetScript = new btc.Script(`6a20${stateHash}`)
-
+    
     const bridgeTx = new btc.Transaction()
         .from(
             [
