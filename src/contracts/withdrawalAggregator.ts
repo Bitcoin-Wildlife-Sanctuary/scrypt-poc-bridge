@@ -144,9 +144,6 @@ export class WithdrawalAggregator extends SmartContract {
             // Construct ownership proof txids.
             const ownershipProofTxId0 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx0)
             const ownershipProofTxId1 = WithdrawalAggregator.getOwnershipProofTxId(ownProofTx1)
-            
-            assert(ownershipProofTxId0 != toByteString('aabbff'))
-            assert(ownershipProofTxId1 != toByteString('aabbff'))
 
             // Check leaves actually unlock passed ownership proof txns.
             // Input structure: ownershipProofTxId + output index (0000000000) + nSequence (ffffffff)
