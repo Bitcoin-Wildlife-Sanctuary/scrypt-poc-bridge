@@ -30,6 +30,8 @@ npm run build
 
 ## Testing Locally
 
+The following command will run a full end-to-end test locally. This includes assembly and local execution of covenant transactions.
+
 ```sh
 npm t
 ```
@@ -59,23 +61,16 @@ addnode=inquisition.taprootwizards.com
 
 Once we have our node up and running, we can start broadcasting our transactions. The tests by default output the serialized transactions which run the smart contract.
 
-For example if we'd like to test the counter smart contract on signet, we'd first run the local test individually:
-
 ```sh
-npx scrypt-cli@latest compile -i "src/contracts/todo.ts" && \
-NETWORK=testnet npx mocha --no-config --require ts-node/register tests/todo.test.ts
+npm run test:testnet
 ```
 
 ```
-Test SmartContract `TODO`
+Deposit funding tx:
 ...
-txFee (serialized): 
-....
-tx0 (serialized): 
+Deposit leaf tx 0:
 ...
-tx1 (serialized): 
-...
-tx2 (serialized): 
+Deposit leaf tx 1:
 ...
 ```
 

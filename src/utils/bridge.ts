@@ -107,7 +107,7 @@ export function deployBridge(
             accountsTree,
         },
         deployTx,
-        fundingTx: fundingRes.txFunds,
+        txFunds: fundingRes.txFunds,
         operatorUTXOs
     }
 }
@@ -587,7 +587,10 @@ export async function performBridgeDeposit(
     )
     
 
-    return bridgeDepositTxRes
+    return {
+        ...bridgeDepositTxRes,
+        txFunds
+    }
 }
 
 export async function performBridgeWithdrawal(
@@ -910,6 +913,7 @@ export async function performBridgeWithdrawal(
     bridgeTx.inputs[1].witnesses = witnessesIn1
 
     return {
+        txFunds,
         bridgeTx,
         accounts,
         accountsTree,

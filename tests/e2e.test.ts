@@ -85,7 +85,7 @@ describe('Test Full E2E Flow', () => {
             seckeyOperator,
             2
         )
-        
+
         operatorUTXOs = depositAggregationRes.operatorUTXOs
 
         const withdrawalAmounts = [1000n, 800n, 700n, 997n]
@@ -121,8 +121,8 @@ describe('Test Full E2E Flow', () => {
                 satoshis: txWithdrawalFunds.outputs[i].satoshis,
                 script: new btc.Script(addrOperator),
             })
-            .to(addrOperator, DUST_AMOUNT)
-            .sign(seckeyOperator)
+                .to(addrOperator, DUST_AMOUNT)
+                .sign(seckeyOperator)
 
             withdrawals.push(
                 {
@@ -138,7 +138,7 @@ describe('Test Full E2E Flow', () => {
                 },
             )
         }
-        
+
         const withdrawalAggregationRes = await performWithdrawalAggregation(
             operatorUTXOs,
             withdrawals,
@@ -149,7 +149,7 @@ describe('Test Full E2E Flow', () => {
             seckeyOperator,
             2
         )
-        
+
         operatorUTXOs = withdrawalAggregationRes.operatorUTXOs
 
         ///////////////////
@@ -162,10 +162,10 @@ describe('Test Full E2E Flow', () => {
             contracts.withdrawalAggregator.scriptP2TR,
             2
         )
-        
+
         let bridgeData = deployRes.bridgeData
         let deployTx = deployRes.deployTx
-        
+
         operatorUTXOs = deployRes.operatorUTXOs
 
         /////////////////////////////////
@@ -275,12 +275,12 @@ describe('Test Full E2E Flow', () => {
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), withdrawalAggregationRes.aggregateTxns[1].outputs[0].script, withdrawalAggregationRes.aggregateTxns[2], 1, flags, withdrawalAggregationRes.aggregateTxns[2].inputs[1].witnesses, withdrawalAggregationRes.aggregateTxns[1].outputs[0].satoshis)
         expect(res).to.be.true
-        
+
         res = interpreter.verify(new btc.Script(''), deployTx.outputs[0].script, bridgeDepositRes.bridgeTx, 0, flags, bridgeDepositRes.bridgeTx.inputs[0].witnesses, deployTx.outputs[0].satoshis)
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), depositAggregationRes.aggregateTxns[2].outputs[0].script, bridgeDepositRes.bridgeTx, 1, flags, bridgeDepositRes.bridgeTx.inputs[1].witnesses, depositAggregationRes.aggregateTxns[2].outputs[0].satoshis)
         expect(res).to.be.true
-        
+
         res = interpreter.verify(new btc.Script(''), bridgeDepositRes.bridgeTx.outputs[0].script, bridgeWithdrawalRes.bridgeTx, 0, flags, bridgeWithdrawalRes.bridgeTx.inputs[0].witnesses, bridgeDepositRes.bridgeTx.outputs[0].satoshis)
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), withdrawalAggregationRes.aggregateTxns[2].outputs[0].script, bridgeWithdrawalRes.bridgeTx, 1, flags, bridgeWithdrawalRes.bridgeTx.inputs[1].witnesses, withdrawalAggregationRes.aggregateTxns[2].outputs[0].satoshis)
@@ -300,6 +300,36 @@ describe('Test Full E2E Flow', () => {
         expect(res).to.be.true
         res = interpreter.verify(new btc.Script(''), expansionRes.nodeTxns[2].outputs[0].script, expansionRes.leafTxns[3], 0, flags, expansionRes.leafTxns[3].inputs[0].witnesses, expansionRes.nodeTxns[2].outputs[0].satoshis)
         expect(res).to.be.true
+
+
+        // Print serialized transactions: 
+        console.log('Deposit funding tx:', txDepositFunds.uncheckedSerialize())
+        for (let i = 0; i < depositAggregationRes.leafTxns.length; i++) {
+            console.log(`Deposit leaf tx ${i}:`, depositAggregationRes.leafTxns[i].uncheckedSerialize())
+        }
+        for (let i = 0; i < depositAggregationRes.aggregateTxns.length; i++) {
+            console.log(`Deposit aggregate tx ${i}:`, depositAggregationRes.aggregateTxns[i].uncheckedSerialize())
+        }
+        console.log('Withdrawal funding tx:', txWithdrawalFunds.uncheckedSerialize())
+        for (let i = 0; i < withdrawalAggregationRes.leafTxns.length; i++) {
+            console.log(`Withdrawal leaf tx ${i}:`, withdrawalAggregationRes.leafTxns[i].uncheckedSerialize())
+        }
+        for (let i = 0; i < withdrawalAggregationRes.aggregateTxns.length; i++) {
+            console.log(`Withdrawal aggregate tx ${i}:`, withdrawalAggregationRes.aggregateTxns[i].uncheckedSerialize())
+        }
+        console.log('Bridge deploy funding tx:', deployRes.txFunds.uncheckedSerialize())
+        console.log('Bridge deploy tx:', deployRes.deployTx.uncheckedSerialize())
+        console.log('Bridge deposit funding tx:', bridgeDepositRes.txFunds.uncheckedSerialize())
+        console.log('Bridge deposit tx:', bridgeDepositRes.bridgeTx.uncheckedSerialize())
+        console.log('Bridge withdrawal funding tx:', bridgeWithdrawalRes.txFunds.uncheckedSerialize())
+        console.log('Bridge withdrawal tx:', bridgeWithdrawalRes.bridgeTx.uncheckedSerialize())
+        console.log('Expander funding tx:', expansionRes.txFunds.uncheckedSerialize())
+        for (let i = 0; i < expansionRes.nodeTxns.length; i++) {
+            console.log(`Expander node tx ${i}:`, expansionRes.nodeTxns[i].uncheckedSerialize())
+        }
+        for (let i = 0; i < expansionRes.leafTxns.length; i++) {
+            console.log(`Expander leaf tx ${i}:`, expansionRes.leafTxns[i].uncheckedSerialize())
+        }
     })
 
 })
